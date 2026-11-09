@@ -2,7 +2,7 @@
 
 Simulador de pruebas de hipótesis (Wackerly, *Estadística matemática con aplicaciones*, capítulo 10) con casos clínicos ficticios.
 
-**Abrir la app:** https://katdhx.github.io/junta-medica/
+**Abrir la app:** https://katdhx.github.io/Junta-medica/
 
 Hecho por Karol Urbano, Universidad de los Andes.
 
@@ -14,3 +14,5 @@ Hecho por Karol Urbano, Universidad de los Andes.
 | El tensiómetro | Precisión de un aparato | χ² para una varianza y F para dos |
 
 Todas las personas, lugares y datos son ficticios y tienen fines didácticos.
+
+Guía de la aplicación: [Guia_Junta_Medica.pdf](Guia_Junta_Medica.pdf)
