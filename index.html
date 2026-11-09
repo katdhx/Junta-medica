@@ -1,0 +1,2237 @@
+<!doctype html>
+<html lang="es">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="description" content="Junta Médica: simulador de pruebas de hipótesis (Wackerly, cap. 10) con casos clínicos ficticios.">
+<style>:root{padding-top:env(safe-area-inset-top,0px);padding-bottom:env(safe-area-inset-bottom,0px)}body{margin:0;font:14px system-ui,sans-serif}img{max-width:100%}[hidden]{display:none!important}</style>
+<title>Junta Médica</title>
+<meta name="claude:viewport-fit-sides" content="cover">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:opsz,wght@12..96,500;12..96,700;12..96,800&family=Atkinson+Hyperlegible:ital,wght@0,400;0,700;1,400&family=IBM+Plex+Mono:wght@400;600&display=swap">
+<style>
+/* Layout: guardia nocturna — un monitor de signos vitales como cabecera, historias clínicas como tarjetas, el "monitor" de la prueba como pieza central */
+:root{
+  --bg:#0b1517; --panel:#112124; --panel-2:#16292d; --line:#24403f;
+  --fg:#e3ecea; --muted:#8fa7a4;
+  --h0:#4fd1c5;      /* bebé sano: verde quirófano */
+  --ha:#e5484d;      /* condición: rojo sangre */
+  --red:#e5484d; --red-deep:#3a1517;
+  --bad:#f5c451; --good:#7bd88f;  /* error = amarillo advertencia, para no chocar con el rojo de la condición */
+  --display:"Bricolage Grotesque", "Segoe UI", system-ui, sans-serif;
+  --body:"Atkinson Hyperlegible", "Segoe UI", system-ui, sans-serif;
+  --mono:"IBM Plex Mono", ui-monospace, Menlo, monospace;
+  color-scheme:dark;
+}
+*,*::before,*::after{box-sizing:border-box}
+html,body{background:var(--bg);color:var(--fg)}
+.wrap>*,.fase-panel>*,.lab>*{min-width:0}
+section.wrap{width:100%}
+.def dd,.def dt{min-width:0}
+body{font-family:var(--body);font-size:16px;line-height:1.55;
+  padding-left:max(16px,env(safe-area-inset-left,0px));padding-right:max(16px,env(safe-area-inset-right,0px));padding-block:20px 48px}
+.wrap{max-width:1040px;margin:0 auto;display:flex;flex-direction:column;gap:28px}
+h1,h2,h3{font-family:var(--display);text-wrap:balance;margin:0;line-height:1.1}
+p{margin:0}
+.eyebrow{font-family:var(--mono);font-size:12px;letter-spacing:.14em;text-transform:uppercase;color:var(--muted)}
+button{font:inherit;cursor:pointer}
+:focus-visible{outline:2px solid var(--h0);outline-offset:3px}
+math{font-size:1.08em}
+
+/* ---------- Monitor ---------- */
+.monitor{position:relative;border:1px solid var(--line);border-radius:14px;background:radial-gradient(120% 140% at 85% 0%,var(--red-deep),transparent 55%),linear-gradient(180deg,#0e1d20,#0a1416);overflow:hidden}
+.monitor canvas{display:block;width:100%;height:110px}
+.monitor .vitals{position:absolute;top:12px;right:16px;display:flex;gap:18px;font-family:var(--mono);font-size:12px;color:var(--muted)}
+.monitor .vitals b{display:block;font-size:22px;color:var(--h0);font-weight:600}
+.monitor .vitals .amb b{color:var(--red)}
+.monitor .pulso{position:absolute;top:16px;left:16px;font-family:var(--mono);font-size:12px;color:var(--red);display:flex;align-items:center;gap:8px}
+.monitor .pulso i{width:9px;height:9px;border-radius:50%;background:var(--red);box-shadow:0 0 10px var(--red);animation:lat 1.1s infinite}
+@keyframes lat{0%,100%{transform:scale(1)}15%{transform:scale(1.6)}30%{transform:scale(1)}}
+
+/* ---------- Inicio ---------- */
+.hero{display:grid;grid-template-columns:1.3fr 1fr;gap:28px;align-items:end}
+.hero h1{font-size:clamp(40px,7vw,76px);font-weight:800;letter-spacing:-.02em}
+.hero h1 span{color:var(--red)}
+.hero .lead{color:var(--muted);max-width:60ch;margin-top:12px}
+.acceso{background:var(--panel);border:1px solid var(--line);border-radius:14px;padding:18px;display:flex;flex-direction:column;gap:10px}
+.acceso label{font-family:var(--mono);font-size:12px;letter-spacing:.12em;text-transform:uppercase;color:var(--muted)}
+.acceso input{font:inherit;font-size:18px;background:var(--bg);color:var(--fg);border:1px solid var(--line);border-radius:10px;padding:12px 14px}
+.acceso .saludo{color:var(--h0);font-size:15px;min-height:1.5em}
+.casos{display:grid;grid-template-columns:repeat(2,1fr);gap:14px}
+.caso{background:var(--panel);border:1px solid var(--line);border-radius:14px;padding:18px;display:flex;flex-direction:column;gap:10px;text-align:left;color:var(--fg)}
+.caso h3{font-size:20px}
+.caso p{color:var(--muted);font-size:14.5px}
+.caso .tema{font-family:var(--mono);font-size:12px;color:var(--h0)}
+.caso.abierto{border-color:var(--red);background:linear-gradient(160deg,#2a1416,var(--panel) 60%)}
+.caso .organo{width:64px;height:52px;color:var(--muted)}
+.caso.abierto .organo{color:var(--red)}
+.caso.abierto:hover{transform:translateY(-2px)}
+.caso{transition:transform .15s}
+.caso.cerrado{opacity:.55;cursor:default}
+.caso .pie{margin-top:auto;font-family:var(--mono);font-size:12px;color:var(--muted)}
+.caso.abierto .pie{color:var(--red)}
+.nota{font-size:13.5px;color:var(--muted);border-top:1px solid var(--line);padding-top:16px;max-width:75ch}
+
+/* ---------- Caso ---------- */
+.volver{background:none;border:0;color:var(--muted);padding:0;font-family:var(--mono);font-size:13px;align-self:flex-start}
+.volver:hover{color:var(--fg)}
+.historia{display:grid;grid-template-columns:280px 1fr;gap:24px;align-items:start}
+.ficha{background:var(--panel);border:1px solid var(--line);border-radius:14px;padding:18px;font-size:14.5px}
+.ficha h3{font-size:22px;margin:4px 0 12px}
+.ficha dl{display:grid;grid-template-columns:auto 1fr;gap:6px 12px;margin:0}
+.ficha dt{color:var(--muted);font-family:var(--mono);font-size:12px;padding-top:2px}
+.ficha dd{margin:0}
+.relato{display:flex;flex-direction:column;gap:12px;max-width:65ch}
+.relato h2{font-size:clamp(28px,4vw,40px)}
+.relato .quien{color:var(--h0)}
+
+.pasos{display:flex;flex-direction:column;gap:14px}
+.paso{background:var(--panel);border:1px solid var(--line);border-radius:14px;padding:18px 20px;display:flex;flex-direction:column;gap:10px}
+.paso h3{font-size:19px}
+.paso .def{display:grid;grid-template-columns:auto 1fr;gap:8px 16px;align-items:baseline}
+.paso .def dt{font-family:var(--mono);color:var(--h0);white-space:nowrap}
+.paso .def dd{margin:0;color:var(--fg)}
+.formula{background:var(--bg);border:1px solid var(--line);border-radius:10px;padding:14px;overflow-x:auto;text-align:center}
+.h0c{color:var(--h0)} .hac{color:var(--ha)}
+
+.lab{display:grid;grid-template-columns:1fr 300px;gap:18px}
+.pantalla{background:#091214;border:1px solid var(--line);border-radius:14px;padding:12px;min-width:0}
+.pantalla canvas{display:block;width:100%;height:330px}
+.leyenda{display:flex;flex-wrap:wrap;gap:14px;font-size:13px;color:var(--muted);padding:6px 4px 0}
+.leyenda i{display:inline-block;width:12px;height:12px;border-radius:3px;margin-right:6px;vertical-align:-1px}
+.controles{display:flex;flex-direction:column;gap:14px}
+.control{background:var(--panel);border:1px solid var(--line);border-radius:12px;padding:14px}
+.control label{display:flex;justify-content:space-between;font-size:14px;margin-bottom:8px}
+.control label output{font-family:var(--mono);color:var(--fg)}
+.control small{display:block;color:var(--muted);font-size:12.5px;margin-top:6px}
+input[type=range]{width:100%;accent-color:var(--h0)}
+.lecturas{display:grid;grid-template-columns:1fr 1fr 1fr;gap:10px}
+.lect{background:var(--panel);border:1px solid var(--line);border-radius:12px;padding:12px;font-variant-numeric:tabular-nums}
+.lect .eyebrow{font-size:11px}
+.lect b{display:block;font-family:var(--mono);font-size:24px;font-weight:600;margin-top:4px}
+.lect.a b{color:var(--h0)} .lect.b b{color:var(--ha)} .lect.p b{color:var(--fg)}
+.lect span{font-size:12.5px;color:var(--muted)}
+
+.meta{border:1px dashed var(--line);border-radius:12px;padding:14px 16px;display:flex;gap:14px;align-items:center;flex-wrap:wrap}
+.meta .chip{font-family:var(--mono);font-size:12px;padding:4px 10px;border-radius:999px;border:1px solid currentColor}
+.meta .chip.no{color:var(--bad)} .meta .chip.si{color:var(--good)}
+.meta p{flex:1;min-width:220px;font-size:14.5px}
+
+.sala{display:grid;grid-template-columns:1fr 1fr;gap:18px}
+.cuna{background:var(--panel);border:1px solid var(--line);border-radius:14px;padding:16px;display:flex;flex-direction:column;gap:10px}
+.cuna h3{font-size:16px}
+.puntos{display:grid;grid-template-columns:repeat(20,1fr);gap:4px}
+.puntos span{aspect-ratio:1;border-radius:50%;background:var(--line)}
+.puntos span.ok{background:var(--h0)} .puntos span.okb{background:var(--ha)}
+.puntos span.mal{background:transparent;box-shadow:inset 0 0 0 2px var(--bad)}
+.cuna .res{font-size:14px;color:var(--muted)}
+.cuna .res b{color:var(--fg);font-family:var(--mono)}
+.btn{background:var(--h0);color:#062022;border:0;border-radius:10px;padding:11px 16px;font-weight:700;align-self:flex-start}
+.btn:hover{filter:brightness(1.08)}
+.btn.sec{background:transparent;color:var(--fg);border:1px solid var(--line)}
+
+@media (max-width:820px){
+  .hero,.historia,.lab,.sala{grid-template-columns:1fr}
+  .casos{grid-template-columns:1fr}
+  .monitor .vitals{gap:10px}
+  .monitor .vitals b{font-size:17px}
+}
+@media (max-width:460px){
+  .lecturas{grid-template-columns:1fr}
+  .pantalla canvas{height:260px}
+  .puntos{grid-template-columns:repeat(10,1fr)}
+}
+/* portada */
+.portada{max-width:940px;width:100%;margin:0 auto;border:1px solid var(--line);border-radius:22px;padding:24px max(16px,3vw) 26px;display:flex;flex-direction:column;gap:18px;
+  background:radial-gradient(70% 50% at 50% 0%,rgba(229,72,77,.16),transparent 70%),linear-gradient(180deg,#132528,#0c1719)}
+.escudo{width:min(460px,100%);height:auto;margin:0 auto;display:block}
+.lema{text-align:center;font-family:var(--display);font-weight:500;font-size:clamp(17px,2.4vw,21px);max-width:52ch;margin:0 auto;text-wrap:balance}
+.fila-a{display:grid;grid-template-columns:1.3fr 1fr .9fr;gap:16px}
+.modos{grid-template-columns:repeat(2,1fr)}
+.campo{display:flex;flex-direction:column;gap:8px;min-width:0}
+.campo input{font:inherit;font-size:17px;background:#0a1416;color:var(--fg);border:1px solid var(--line);border-radius:10px;padding:13px 14px}
+.niveles{display:grid;grid-template-columns:repeat(3,1fr);gap:8px}
+.niveles button{background:#0a1416;color:var(--muted);border:1px solid var(--line);border-radius:10px;padding:13px 6px}
+.niveles button[aria-pressed=true]{color:var(--fg);border-color:var(--red);background:var(--red-deep);box-shadow:0 0 0 1px var(--red) inset}
+.fila-b{display:grid;grid-template-columns:repeat(3,1fr);gap:12px}
+.tile{display:flex;flex-direction:column;gap:4px;text-align:left;background:#0e1c1f;color:var(--fg);border:1px solid var(--line);border-radius:12px;padding:16px 16px 14px}
+.tile .tt{font-family:var(--display);font-weight:700;font-size:17px}
+.tile .ts{font-size:13.5px;color:var(--muted)}
+.t-caso{border-color:#2f5d5a}.t-caso .ts{color:var(--h0)}
+.t-ins{border-color:#5a2a2e}.t-ins .ts{color:#f08f92}
+.t-mapa .ts{color:#d9b26f}
+.tile:hover{background:#12252a}
+.fila-c{display:grid;grid-template-columns:1fr 1fr;gap:12px;max-width:620px}
+.btn.grande{align-self:stretch;padding:14px;font-size:17px;font-family:var(--display)}
+.btn:not(.sec){background:var(--red);color:#fff}
+#vista-inicio>.nota{max-width:940px;width:100%;margin:0 auto}
+.aviso{min-height:1.4em;color:#f08f92;font-size:14px}
+.modal-fondo{position:fixed;inset:0;background:rgba(3,8,9,.72);backdrop-filter:blur(4px);z-index:50;display:flex;align-items:center;justify-content:center;
+  padding:max(16px,env(safe-area-inset-top,0px)) max(16px,env(safe-area-inset-right,0px)) max(16px,env(safe-area-inset-bottom,0px)) max(16px,env(safe-area-inset-left,0px))}
+[hidden]{display:none!important}
+.modal{background:var(--panel);border:1px solid var(--line);border-radius:16px;padding:20px;width:min(860px,100%);max-height:100%;overflow:auto;display:flex;flex-direction:column;gap:14px}
+.mhead{display:flex;justify-content:space-between;align-items:center;gap:12px}
+.mhead h2{font-size:24px}
+.cerrar{background:none;border:1px solid var(--line);color:var(--muted);border-radius:8px;padding:6px 12px}
+.insignias{display:grid;grid-template-columns:repeat(3,1fr);gap:10px}
+.insig{background:#0e1c1f;border:1px solid var(--line);border-radius:12px;padding:14px;color:var(--muted);display:flex;flex-direction:column;align-items:center;gap:8px}
+.insig svg{width:44px;height:44px}
+.insig[aria-pressed=true]{color:var(--red);border-color:var(--red);background:var(--red-deep)}
+.insig[aria-pressed=true] span{color:var(--fg)}
+.mapa{width:100%;height:auto}
+.piso.abierto{cursor:pointer}
+.piso .sala-btn{fill:var(--red-deep);stroke:var(--red)}
+.piso.abierto:hover rect:first-child,.piso.abierto:focus-visible rect:first-child{fill:#173033}
+.piso:focus-visible{outline:none}
+.reglas{display:flex;flex-direction:column;gap:10px}
+.reglas .def{display:grid;grid-template-columns:auto 1fr;gap:8px 16px}
+.reglas .def dt{font-family:var(--mono);color:var(--red)}
+.reglas .def dd{margin:0}
+.monitor .pulso svg{width:18px;height:18px;color:var(--red)}
+details.teoria>summary{cursor:pointer;font-family:var(--mono);font-size:12px;letter-spacing:.14em;text-transform:uppercase;color:var(--muted);margin-bottom:12px;list-style:none}
+details.teoria>summary::before{content:"▸ ";color:var(--red)}
+details.teoria[open]>summary::before{content:"▾ "}
+:root[data-nivel=jefe] .pista,:root[data-nivel=jefe] .pista-exp{display:none}
+:root[data-nivel=residente] .pista{display:none}
+:root:not([data-nivel=interno]) .solo-interno{display:none}
+@media (max-width:720px){.fila-a,.fila-c{grid-template-columns:1fr}.fila-b{grid-template-columns:1fr}.insignias{grid-template-columns:repeat(2,1fr)}}
+
+/* misión y junta */
+.mision{border:1px solid var(--red);border-radius:16px;background:linear-gradient(180deg,#1a1416,var(--panel) 40%);padding:18px 20px;display:flex;flex-direction:column;gap:14px}
+.mision>.m-head{display:flex;flex-wrap:wrap;gap:12px;align-items:center;justify-content:space-between}
+.mision h3{font-size:22px}
+.m-ctx{background:var(--bg);border:1px solid var(--line);border-radius:10px;padding:12px 14px;font-size:15px}
+.m-ctx b{font-family:var(--mono)}
+.m-test{border-top:1px solid var(--line);padding-top:12px;display:flex;flex-direction:column;gap:10px}
+.m-test h4{margin:0;font-family:var(--display);font-size:17px}
+.m-campos{display:flex;flex-wrap:wrap;gap:12px}
+.m-campo{display:flex;flex-direction:column;gap:6px;min-width:150px;flex:1}
+.m-campo label{font-size:13.5px;color:var(--muted)}
+.m-campo input{font:inherit;font-family:var(--mono);font-size:17px;background:var(--bg);color:var(--fg);border:1px solid var(--line);border-radius:10px;padding:10px 12px;width:100%}
+.m-hint{font-size:12.5px;color:var(--muted);font-family:var(--mono)}
+.m-dec{display:flex;flex-wrap:wrap;gap:8px}
+.m-dec button{flex:1;min-width:150px;background:var(--bg);color:var(--fg);border:1px solid var(--line);border-radius:10px;padding:11px 10px}
+.m-dec button[aria-pressed=true]{border-color:var(--red);background:var(--red-deep);box-shadow:0 0 0 1px var(--red) inset}
+.m-err{color:var(--bad);font-size:14px;min-height:1.3em}
+.m-fb{display:flex;flex-direction:column;gap:6px;font-size:14.5px}
+.m-fb .ok::before{content:"✓ ";color:var(--good);font-weight:700}
+.m-fb .no::before{content:"✗ ";color:var(--bad);font-weight:700}
+.m-fb .pts{font-family:var(--mono);color:var(--muted);float:right}
+.m-verdad{border:1px dashed var(--line);border-radius:10px;padding:12px 14px;font-size:14.5px}
+.pregunta{background:var(--bg);border:1px solid var(--line);border-radius:12px;padding:14px;display:flex;flex-direction:column;gap:10px}
+.quien-habla{display:flex;align-items:center;gap:10px}
+.quien-habla .av{width:34px;height:34px;border-radius:50%;display:grid;place-items:center;font-family:var(--display);font-weight:800;font-size:15px;color:#081314}
+.av.est{background:var(--h0)} .av.med{background:var(--red);color:#fff} .av.epi{background:#d9b26f}
+.quien-habla b{font-family:var(--display)} .quien-habla span{color:var(--muted);font-size:13px}
+.opciones{display:flex;flex-direction:column;gap:8px}
+.opciones button{text-align:left;background:var(--panel);color:var(--fg);border:1px solid var(--line);border-radius:10px;padding:10px 12px}
+.opciones button:hover:not(:disabled){border-color:var(--muted)}
+.opciones button.bien{border-color:var(--good);background:#13301f}
+.opciones button.mal{border-color:var(--bad);background:#33290f}
+.opciones button:disabled{cursor:default}
+.expl{font-size:14px;color:var(--muted)}
+.m-total{display:flex;flex-wrap:wrap;align-items:center;gap:14px;justify-content:space-between;border-top:1px solid var(--line);padding-top:12px}
+.m-total .nota-final{font-family:var(--display);font-size:34px;font-weight:800}
+.m-total .nota-final small{font-size:15px;color:var(--muted);font-weight:500}
+.sello{font-family:var(--mono);font-size:12px;padding:4px 10px;border-radius:999px;border:1px solid currentColor}
+.sello.aprob{color:var(--good)} .sello.repr{color:var(--bad)}
+:root[data-nivel=jefe] .verdad{display:none}
+.solo-jefe{display:none}
+:root[data-nivel=jefe] .solo-jefe{display:block}
+.oculto-jefe{background:var(--panel);border:1px dashed var(--line);border-radius:12px;padding:14px;font-size:13.5px;color:var(--muted)}
+/* expediente */
+.expediente{display:grid;grid-template-columns:1.3fr 1fr 1fr 1.4fr;gap:10px;font-variant-numeric:tabular-nums}
+.expediente>div{background:#0a1416;border:1px solid var(--line);border-radius:12px;padding:12px}
+.expediente b{display:block;font-family:var(--display);font-size:18px;margin-top:2px}
+.expediente .sig b{color:var(--red)}
+.estado-caso{font-family:var(--mono);font-size:11px;letter-spacing:.08em;padding:3px 8px;border-radius:999px;border:1px solid var(--line);color:var(--muted);align-self:flex-start}
+.estado-caso.hecho{color:var(--good);border-color:var(--good)}
+.estado-caso.curso{color:#d9b26f;border-color:#d9b26f}
+@media (max-width:720px){.expediente{grid-template-columns:1fr 1fr}}
+
+/* fases */
+body::before{content:"";position:fixed;inset:0 0 auto;height:env(safe-area-inset-top,0px);z-index:10;background:var(--bg)}
+.fases{display:flex;gap:6px;overflow-x:auto;position:sticky;top:env(safe-area-inset-top,0px);z-index:8;background:var(--bg);padding-block:10px;border-bottom:1px solid var(--line);scrollbar-width:none}
+.fases::-webkit-scrollbar{display:none}
+.fases button{flex:1 0 auto;background:transparent;border:1px solid var(--line);color:var(--muted);border-radius:999px;padding:8px 14px;font-family:var(--mono);font-size:12.5px;letter-spacing:.05em;display:flex;align-items:center;justify-content:center;gap:8px}
+.fases button .fn{display:inline-grid;place-items:center;width:20px;height:20px;border-radius:50%;border:1px solid currentColor;font-size:11px}
+.fases button[aria-selected=true]{color:var(--fg);background:var(--red-deep);border-color:var(--red)}
+.fases .listo{color:var(--red);font-size:10px}
+.fase-panel{display:flex;flex-direction:column;gap:24px}
+.sig-fase{align-self:flex-end}
+/* intervalo de confianza */
+.m-ic{border:1px solid var(--line);border-radius:10px;padding:12px 14px;display:flex;flex-direction:column;gap:8px;font-size:14.5px}
+.m-ic svg{width:100%;height:auto;display:block}
+.m-ic .icmsg{border-left:3px solid var(--line);padding-left:10px}
+.m-ic .icmsg.alerta{border-color:#d9b26f}
+.m-ic .icmsg.bien{border-color:var(--good)}
+/* simulador de convergencia */
+.simpanel{background:var(--panel);border:1px solid var(--line);border-radius:14px;padding:14px;display:flex;flex-direction:column;gap:10px;margin-top:12px}
+.sim-bar{display:flex;flex-wrap:wrap;gap:8px;align-items:center}
+.sim-bar .btn{padding:8px 14px}
+.vel{display:flex;border:1px solid var(--line);border-radius:10px;overflow:hidden}
+.vel button{background:transparent;border:0;color:var(--muted);padding:8px 12px;font-family:var(--mono);font-size:13px}
+.vel button[aria-pressed=true]{background:var(--red-deep);color:var(--fg)}
+.sim-n{font-family:var(--mono);font-size:13px;color:var(--muted);margin-left:auto;font-variant-numeric:tabular-nums}
+.simpanel canvas{display:block;width:100%;height:220px}
+.toque{font-size:12.5px;color:var(--muted)}
+
+/* caso 2 */
+.alfas{display:flex;gap:6px}
+.alfas label{flex:1;margin:0;display:block}
+.alfas input{position:absolute;opacity:0;pointer-events:none}
+.alfas span{display:block;text-align:center;padding:8px 4px;border:1px solid var(--line);border-radius:8px;font-family:var(--mono);font-size:13px;color:var(--muted);cursor:pointer}
+.alfas input:checked+span{border-color:var(--red);color:var(--fg);background:var(--red-deep)}
+.alfas input:focus-visible+span{outline:2px solid var(--h0);outline-offset:2px}
+.dos{display:grid;grid-template-columns:1fr 1fr;gap:18px}
+.dos .pantalla canvas{height:240px}
+.veredita{background:var(--panel);border:1px solid var(--line);border-radius:14px;padding:16px;display:grid;grid-template-columns:1fr 300px;gap:18px}
+.veredita canvas{display:block;width:100%;height:200px}
+.veredita .info{display:flex;flex-direction:column;gap:10px;font-variant-numeric:tabular-nums}
+.fila{display:flex;justify-content:space-between;gap:10px;border-bottom:1px solid var(--line);padding-bottom:6px;font-size:14.5px}
+.fila b{font-family:var(--mono)}
+.veredicto{border-radius:10px;padding:12px;font-size:14.5px;border:1px solid var(--line)}
+.veredicto.rech{border-color:var(--red);background:var(--red-deep)}
+.veredicto.norech{border-color:var(--h0);background:#0f2a2a}
+.repet{font-size:14.5px;color:var(--muted)}
+.repet b{color:var(--fg);font-family:var(--mono)}
+@media (max-width:820px){.dos,.veredita{grid-template-columns:1fr}
+  .lab>:first-child{position:sticky;top:calc(env(safe-area-inset-top,0px) + 58px);z-index:5;align-self:start;background:var(--bg);padding-bottom:8px}
+  .lab .dos{grid-template-columns:none;grid-auto-flow:column;grid-auto-columns:90%;overflow-x:auto;scroll-snap-type:x mandatory;gap:10px}
+  .lab .dos>*{scroll-snap-align:start}
+  .lab .pantalla canvas,.lab .grupos canvas{height:210px!important}
+}
+
+/* caso 3 */
+.grupos canvas{height:290px}
+#vista-caso3 .dos{align-items:start}
+.tabla3{align-content:start;display:grid;grid-template-columns:auto 1fr 1fr;gap:6px 14px;font-variant-numeric:tabular-nums;font-size:14.5px;align-items:baseline}
+.tabla3 .h{font-family:var(--mono);font-size:11px;letter-spacing:.1em;color:var(--muted);text-transform:uppercase}
+.tabla3 b{font-family:var(--mono)}
+
+/* caso 4 */
+.lecturas4{display:grid;grid-template-columns:1fr 1fr;gap:18px}
+.lecturas4 .info{background:var(--panel);border:1px solid var(--line);border-radius:14px;padding:16px;display:flex;flex-direction:column;gap:10px;font-variant-numeric:tabular-nums}
+.lecturas4 h3{font-size:17px}
+#c4tira{display:block;width:100%;height:200px}
+@media (max-width:820px){.lecturas4{grid-template-columns:1fr}}
+
+/* lámina anatómica */
+.lamina{background:radial-gradient(90% 120% at 50% 0%,#14262a,#0a1416);border:1px solid var(--line);border-radius:14px;padding:16px;display:grid;grid-template-columns:1fr 240px;gap:18px}
+.lamina svg{width:100%;height:auto;display:block}
+.lamina .lado{display:flex;flex-direction:column;gap:12px}
+.lamina .lado p{font-size:14.5px;color:var(--muted)}
+.toggle{display:flex;border:1px solid var(--line);border-radius:10px;overflow:hidden}
+.toggle button{flex:1;background:transparent;color:var(--muted);border:0;padding:10px 8px;font-size:14px}
+.toggle button[aria-pressed=true].s{background:var(--h0);color:#062022;font-weight:700}
+.toggle button[aria-pressed=true].e{background:var(--red);color:#fff;font-weight:700}
+.medidor{background:var(--panel);border:1px solid var(--line);border-radius:12px;padding:12px}
+.medidor .barra{height:10px;border-radius:999px;background:var(--line);overflow:hidden;margin-top:8px}
+.medidor .barra i{display:block;height:100%;width:0;background:var(--h0);transition:width .6s,background .6s}
+.medidor b{font-family:var(--mono);font-size:22px}
+.org-lin{fill:none;stroke:currentColor;stroke-width:1.6;stroke-linecap:round;stroke-linejoin:round}
+.lbl{font-family:var(--mono);font-size:11px;fill:var(--muted);letter-spacing:.08em}
+.lbl-b{font-family:var(--body);font-size:13px;fill:var(--fg)}
+@media (max-width:820px){.lamina{grid-template-columns:1fr}}
+@media (prefers-reduced-motion:reduce){.caso{transition:none}.monitor .pulso i{animation:none}}
+</style>
+</head>
+<body>
+
+
+<div class="wrap">
+
+  <div class="monitor" aria-hidden="true">
+    <canvas id="ecg"></canvas>
+    <div class="pulso"><i></i><span id="guardiaTxt">GUARDIA · EN VIVO</span><svg id="guardiaIns" viewBox="0 0 48 48" class="org-lin" aria-hidden="true"></svg></div>
+    <div class="vitals"><div>α<b id="vA">0.05</b></div><div class="amb">β<b id="vB">0.05</b></div><div>n<b id="vN">1</b></div></div>
+  </div>
+
+  <!-- ================= INICIO ================= -->
+  <section id="vista-inicio" class="wrap" style="gap:24px">
+    <div class="portada">
+      <svg class="escudo" viewBox="0 0 440 300" role="img" aria-label="Escudo de Junta Médica: vara de Esculapio sobre una campana de Gauss">
+  <defs>
+    <linearGradient id="gEsc" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#7a1f25"/><stop offset="1" stop-color="#3a0f13"/></linearGradient>
+    <linearGradient id="gOro" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#f6dfa5"/><stop offset=".55" stop-color="#d9b26f"/><stop offset="1" stop-color="#9c7337"/></linearGradient>
+    <radialGradient id="gHalo" cx=".5" cy=".45" r=".6"><stop offset="0" stop-color="#e5484d" stop-opacity=".35"/><stop offset="1" stop-color="#e5484d" stop-opacity="0"/></radialGradient>
+  </defs>
+  <ellipse cx="220" cy="140" rx="210" ry="140" fill="url(#gHalo)"/>
+  <path class="esc-ecg" d="M0 150 H120 L132 150 L140 128 L150 176 L160 104 L172 168 L182 150 H440" fill="none" stroke="#e5484d" stroke-width="2.5" stroke-linejoin="round" opacity=".85"/>
+  <path d="M220 18 L340 48 C340 150 300 220 220 262 C140 220 100 150 100 48 Z" fill="url(#gEsc)" stroke="url(#gOro)" stroke-width="5"/>
+  <path d="M220 34 L326 60 C324 148 290 206 220 244 C150 206 116 148 114 60 Z" fill="none" stroke="#d9b26f" stroke-opacity=".45" stroke-width="1.5"/>
+  <path d="M122 196 C162 196 182 92 220 92 C258 92 278 196 318 196 Z" fill="#4fd1c5" fill-opacity=".14"/>
+  <path d="M122 196 C162 196 182 92 220 92 C258 92 278 196 318 196" fill="none" stroke="#4fd1c5" stroke-width="2.5"/>
+  <path d="M258 196 C262 170 270 150 280 140 L280 196 Z" fill="#e5484d" fill-opacity=".5"/>
+  <line x1="220" y1="66" x2="220" y2="236" stroke="#d9b26f" stroke-width="8" stroke-linecap="round"/>
+  <circle cx="220" cy="62" r="8" fill="url(#gOro)"/>
+  <path d="M220 222 C190 214 190 194 220 188 C250 182 250 162 220 156 C190 150 190 130 220 124 C244 119 248 104 234 96" fill="none" stroke="#f1e4c4" stroke-width="6" stroke-linecap="round"/>
+  <ellipse cx="231" cy="93" rx="8" ry="5.5" fill="#f1e4c4" transform="rotate(-25 231 93)"/>
+  <path d="M74 206 L34 210 L52 230 L34 254 L84 250 Z" fill="#4a1418" stroke="url(#gOro)" stroke-width="2.5"/>
+  <path d="M366 206 L406 210 L388 230 L406 254 L356 250 Z" fill="#4a1418" stroke="url(#gOro)" stroke-width="2.5"/>
+  <path d="M70 198 H370 L358 252 H82 Z" fill="#5c171c" stroke="url(#gOro)" stroke-width="3"/>
+  <text x="220" y="238" text-anchor="middle" font-family="Bricolage Grotesque, system-ui, sans-serif" font-weight="800" font-size="33" letter-spacing="2.5" fill="url(#gOro)" stroke="#2a0a0c" stroke-width="1">JUNTA MÉDICA</text>
+  <text x="220" y="278" text-anchor="middle" font-family="IBM Plex Mono, monospace" font-size="12" letter-spacing="3" fill="#d9b26f">· SIMULADOR DE DECISIONES CLÍNICAS ·</text>
+</svg>
+      <p class="lema">Guardia nocturna para pruebas de hipótesis: cada caso es una persona y cada decisión es una prueba.</p>
+      <div class="expediente" aria-live="polite">
+        <div><span class="eyebrow">Rango</span><b id="xRango">Interno de primer día</b></div>
+        <div><span class="eyebrow">Casos aprobados</span><b id="xCasos">0 de 4</b></div>
+        <div><span class="eyebrow">Puntaje total</span><b id="xPts">0</b></div>
+        <div class="sig"><span class="eyebrow">Siguiente misión</span><b id="xSig">Tamizaje neonatal</b></div>
+      </div>
+      <div class="fila-a">
+        <div class="campo">
+          <label class="eyebrow" for="nombre">Residente de turno</label>
+          <input id="nombre" type="text" placeholder="Escribe tu nombre" autocomplete="off">
+        </div>
+        <div class="campo">
+          <span class="eyebrow">Nivel de la junta</span>
+          <div class="niveles" role="group" aria-label="Nivel">
+            <button type="button" data-n="interno">Interno</button>
+            <button type="button" data-n="residente">Residente</button>
+            <button type="button" data-n="jefe">Jefe</button>
+          </div>
+        </div>
+        <div class="campo">
+          <span class="eyebrow">Modo</span>
+          <div class="niveles modos" role="group" aria-label="Modo">
+            <button type="button" data-m="practica">Práctica</button>
+            <button type="button" data-m="evaluacion">Evaluación</button>
+          </div>
+        </div>
+      </div>
+      <div class="fila-b">
+        <button type="button" class="tile t-caso" id="bCaso"><span class="tt">Elegir caso</span><span class="ts" id="selCaso">Caso 1 · Tamizaje neonatal</span></button>
+        <button type="button" class="tile t-ins" id="bIns"><span class="tt">Elegir insignia</span><span class="ts" id="selIns">Fonendo</span></button>
+        <button type="button" class="tile t-mapa" id="bMapa"><span class="tt">Mapa del hospital</span><span class="ts">Pisos y servicios</span></button>
+      </div>
+      <div class="fila-c">
+        <button type="button" class="btn sec grande" id="bComo">Cómo jugar</button>
+        <button type="button" class="btn grande" id="bIniciar">Iniciar guardia</button>
+      </div>
+      <p class="aviso" id="aviso" role="status"></p>
+    </div>
+    <p class="nota">Todas las personas de estos casos son ficticias y los datos son simulados con fines didácticos; no son valores clínicos de referencia. Cada historia se escribe con lenguaje de persona primero ("persona con lupus") y sin imágenes de cuerpos enfermos.</p>
+  </section>
+
+  <!-- ===== modales ===== -->
+  <div class="modal-fondo" id="mCaso" hidden><div class="modal" role="dialog" aria-modal="true" aria-labelledby="mCasoT">
+    <div class="mhead"><h2 id="mCasoT">Casos de la noche</h2><button type="button" class="cerrar" data-cerrar>Cerrar</button></div>
+    <div class="casos">
+        <button class="caso abierto" id="abrir-caso1" type="button">
+          <span class="estado-caso" data-ec="1">Pendiente</span>
+          <svg class="organo" viewBox="0 0 140 100" aria-hidden="true"><path class="org-lin" d="M10 38 C10 18 40 8 74 10 C108 12 128 16 132 26 C136 36 124 44 108 50 C88 60 72 76 52 88 C36 96 16 92 10 74 C6 62 8 50 10 38Z"/><path class="org-lin" d="M74 12 C70 34 64 54 56 70"/><ellipse class="org-lin" cx="62" cy="78" rx="7" ry="10"/></svg>
+          <span class="tema">10.1 – 10.4 · α, β, potencia</span>
+          <h3>Tamizaje neonatal</h3>
+          <p>Antonia tiene tres días de nacida. Una gota de sangre del talón decide si la llaman de vuelta al hospital.</p>
+          <span class="pie">Elegir este caso</span>
+        </button>
+        <button class="caso abierto" id="abrir-caso2" type="button">
+          <span class="estado-caso" data-ec="2">Pendiente</span>
+          <svg class="organo" viewBox="0 0 140 100" aria-hidden="true"><path class="org-lin" d="M70 30 C62 14 36 14 32 36 C28 58 50 76 72 92 C94 74 112 56 106 34 C100 14 78 16 70 30Z"/><path class="org-lin" d="M64 26 C62 8 82 2 92 12 C96 16 96 22 94 26"/><path class="org-lin" d="M56 24 C54 14 48 8 42 8"/><path class="org-lin" d="M70 40 C66 56 70 70 76 82"/></svg>
+          <span class="tema">10.3 · prueba z de proporciones</span>
+          <h3>Chagas en la vereda</h3>
+          <p>Luz Marina, promotora de salud en Casanare, sospecha que la infección subió en su vereda. ¿Los datos le dan la razón?</p>
+          <span class="pie">Elegir este caso</span>
+        </button>
+        <button class="caso abierto" id="abrir-caso3" type="button">
+          <span class="estado-caso" data-ec="3">Pendiente</span>
+          <svg class="organo" viewBox="0 0 140 100" aria-hidden="true"><path class="org-lin" d="M40 12 C22 12 14 32 16 52 C18 74 30 90 46 88 C58 86 56 70 52 60 C48 52 50 46 56 40 C62 32 58 12 40 12Z"/><path class="org-lin" d="M100 12 C118 12 126 32 124 52 C122 74 110 90 94 88 C82 86 84 70 88 60 C92 52 90 46 84 40 C78 32 82 12 100 12Z"/><path class="org-lin" d="M54 50 C62 52 66 60 66 98"/><path class="org-lin" d="M86 50 C78 52 74 60 74 98"/></svg>
+          <span class="tema">10.8 · prueba t, dos muestras</span>
+          <h3>Ensayo para lupus</h3>
+          <p>Valentina participa en un ensayo de un tratamiento nuevo. La junta decide si la mejoría es real o es ruido.</p>
+          <span class="pie">Elegir este caso</span>
+        </button>
+        <button class="caso abierto" id="abrir-caso4" type="button">
+          <span class="estado-caso" data-ec="4">Pendiente</span>
+          <svg class="organo" viewBox="0 0 140 100" aria-hidden="true"><path class="org-lin" d="M28 70 A44 44 0 1 1 112 70"/><path class="org-lin" d="M70 70 L96 40"/><circle class="org-lin" cx="70" cy="70" r="5"/><path class="org-lin" d="M34 52 l6 3 M46 34 l4 5 M70 26 v6 M94 34 l-4 5 M106 52 l-6 3"/></svg>
+          <span class="tema">10.9 · pruebas de varianza, χ² y F</span>
+          <h3>El tensiómetro de Don Aurelio</h3>
+          <p>El puesto de salud compró un tensiómetro digital barato. ¿Mide parejo o le "baila" el número?</p>
+          <span class="pie">Elegir este caso</span>
+        </button>
+      </div>
+  </div></div>
+
+  <div class="modal-fondo" id="mIns" hidden><div class="modal" role="dialog" aria-modal="true" aria-labelledby="mInsT">
+    <div class="mhead"><h2 id="mInsT">Tu insignia</h2><button type="button" class="cerrar" data-cerrar>Cerrar</button></div>
+    <p style="color:var(--muted)">Aparece en el monitor mientras estás de guardia.</p>
+    <div class="insignias"><button type="button" class="insig" data-i="fonendo" aria-pressed="false"><svg viewBox="0 0 48 48" class="org-lin" aria-hidden="true"><path d="M14 6v12c0 8 8 12 10 12s10-4 10-12V6"/><path d="M24 30v6c0 6 6 8 10 4"/><circle cx="36" cy="36" r="4"/></svg><span>Fonendo</span></button><button type="button" class="insig" data-i="micro" aria-pressed="false"><svg viewBox="0 0 48 48" class="org-lin" aria-hidden="true"><path d="M14 42h22"/><path d="M20 42c-8-6-6-18 6-20"/><path d="M24 8l6-2 6 16-6 2z"/><path d="M29 24l2 6"/></svg><span>Microscopio</span></button><button type="button" class="insig" data-i="corazon" aria-pressed="false"><svg viewBox="0 0 48 48" class="org-lin" aria-hidden="true"><path d="M24 14c-3-6-14-6-15 3-1 9 7 16 15 23 8-7 16-14 15-23-1-9-12-9-15-3z"/><path d="M8 28h8l3-6 4 12 3-8h14"/></svg><span>Corazón</span></button><button type="button" class="insig" data-i="adn" aria-pressed="false"><svg viewBox="0 0 48 48" class="org-lin" aria-hidden="true"><path d="M16 6c16 10 0 26 16 36"/><path d="M32 6c-16 10 0 26-16 36"/><path d="M18 12h12M17 24h14M18 36h12"/></svg><span>Doble hélice</span></button><button type="button" class="insig" data-i="gota" aria-pressed="false"><svg viewBox="0 0 48 48" class="org-lin" aria-hidden="true"><path d="M24 6S10 22 10 31c0 8 6 13 14 13s14-5 14-13C38 22 24 6 24 6z"/><path d="M17 32c0 4 3 6 6 6"/></svg><span>Gota</span></button><button type="button" class="insig" data-i="cerebro" aria-pressed="false"><svg viewBox="0 0 48 48" class="org-lin" aria-hidden="true"><path d="M24 10c-4-4-12-2-12 4-6 2-6 10-2 12-2 6 4 10 8 8 2 4 6 4 6 0V10z"/><path d="M24 10c4-4 12-2 12 4 6 2 6 10 2 12 2 6-4 10-8 8-2 4-6 4-6 0"/></svg><span>Cerebro</span></button></div>
+  </div></div>
+
+  <div class="modal-fondo" id="mMapa" hidden><div class="modal" role="dialog" aria-modal="true" aria-labelledby="mMapaT">
+    <div class="mhead"><h2 id="mMapaT">Hospital Universitario de la Guardia</h2><button type="button" class="cerrar" data-cerrar>Cerrar</button></div>
+    <svg viewBox="0 0 600 408" class="mapa" role="img" aria-label="Corte del hospital con cuatro pisos: neonatos, cardiología, reumatología y medicina interna">
+      <path d="M60 56 L300 14 L540 56" fill="none" stroke="var(--line)" stroke-width="2"/>
+      <rect x="282" y="26" width="36" height="22" rx="3" fill="var(--red-deep)" stroke="var(--red)"/><path d="M300 30v14M293 37h14" stroke="var(--red)" stroke-width="3"/>
+      <g class="piso abierto" data-caso="4" tabindex="0" role="button" aria-label="Piso 5, Medicina interna, caso 4"><rect x="60" y="58" width="480" height="78" fill="var(--panel)" stroke="var(--line)"/><text class="lbl" x="76" y="80">PISO 5</text><text class="lbl-b" x="76" y="104">Medicina interna</text><text class="lbl" x="76" y="122">El tensiómetro de Don Aurelio</text><rect class="sala-btn" x="400" y="74" width="120" height="46" rx="6"/><text class="lbl" x="460" y="102" text-anchor="middle" fill="var(--fg)">ENTRAR</text><text class="lbl estado-mapa" data-em="4" x="384" y="122" text-anchor="end">PENDIENTE</text></g>
+      <g transform="translate(0 78)">
+      <g class="piso abierto" data-caso="3" tabindex="0" role="button" aria-label="Piso 4, Reumatología, caso 3"><rect x="60" y="58" width="480" height="78" fill="var(--panel)" stroke="var(--line)"/><text class="lbl" x="76" y="80">PISO 4</text><text class="lbl-b" x="76" y="104">Reumatología</text><text class="lbl" x="76" y="122">Ensayo para lupus</text><rect class="sala-btn" x="400" y="74" width="120" height="46" rx="6"/><text class="lbl" x="460" y="102" text-anchor="middle" fill="var(--fg)">ENTRAR</text><text class="lbl estado-mapa" data-em="3" x="384" y="122" text-anchor="end">PENDIENTE</text></g>
+      <g class="piso abierto" data-caso="2" tabindex="0" role="button" aria-label="Piso 3, Cardiología, caso 2"><rect x="60" y="136" width="480" height="78" fill="var(--panel)" stroke="var(--line)"/><text class="lbl" x="76" y="158">PISO 3</text><text class="lbl-b" x="76" y="182">Cardiología</text><text class="lbl" x="76" y="200">Chagas en la vereda</text><rect class="sala-btn" x="400" y="152" width="120" height="46" rx="6"/><text class="lbl" x="460" y="180" text-anchor="middle" fill="var(--fg)">ENTRAR</text><text class="lbl estado-mapa" data-em="2" x="384" y="200" text-anchor="end">PENDIENTE</text></g>
+      <g class="piso abierto" data-caso="1" tabindex="0" role="button" aria-label="Piso 2, Neonatos, caso 1"><rect x="60" y="214" width="480" height="78" fill="var(--panel)" stroke="var(--line)"/><text class="lbl" x="76" y="236">PISO 2</text><text class="lbl-b" x="76" y="260">Neonatos</text><text class="lbl" x="76" y="278">Tamizaje neonatal</text><rect class="sala-btn" x="400" y="230" width="120" height="46" rx="6"/><text class="lbl" x="460" y="258" text-anchor="middle" fill="var(--fg)">ENTRAR</text><text class="lbl estado-mapa" data-em="1" x="384" y="278" text-anchor="end">PENDIENTE</text></g>
+      <rect x="60" y="292" width="480" height="26" fill="#0e1b1d" stroke="var(--line)"/><text class="lbl" x="76" y="309">PISO 1 · URGENCIAS · aquí empieza tu guardia</text>
+    </g>
+    </svg>
+  </div></div>
+
+  <div class="modal-fondo" id="mComo" hidden><div class="modal" role="dialog" aria-modal="true" aria-labelledby="mComoT">
+    <div class="mhead"><h2 id="mComoT">Cómo jugar</h2><button type="button" class="cerrar" data-cerrar>Cerrar</button></div>
+    <div class="reglas">
+      <p><b>1. Firma la guardia.</b> Escribe tu nombre y escoge una insignia.</p>
+      <p><b>2. Escoge el nivel.</b></p>
+      <dl class="def">
+        <dt>Interno</dt><dd>La app te da el estadístico de prueba. Tú decides si rechazas H₀ y defiendes tu decisión ante la junta. Hay pistas.</dd>
+        <dt>Residente</dt><dd>Tú calculas el estadístico con los datos y luego decides. Sin pistas.</dd>
+        <dt>Jefe</dt><dd>Calculas el estadístico y también el valor crítico de la tabla. Los parámetros reales quedan ocultos, como en una investigación de verdad, y la teoría arranca cerrada.</dd>
+      </dl>
+      <p><b>3. Escoge el modo.</b> En <b>Práctica</b> juegas sin que nada quede registrado. En <b>Evaluación</b> la nota entra a tu expediente.</p>
+      <p><b>Cada caso tiene cuatro fases</b>, en pestañas: Admisión (la historia y la lámina), Diseño (la teoría y los parámetros del estudio), Laboratorio (tomar los datos) y Junta (decidir, defenderte y ver la evaluación).</p>
+      <p><b>4. Toma los datos y decide.</b> El veredicto no aparece hasta que entregues tu decisión.</p>
+      <p><b>5. Defiéndete ante la junta.</b> La estadística, la médica y la epidemióloga te hacen una pregunta cada una.</p>
+      <dl class="def">
+        <dt>Cálculo</dt><dd>20 puntos</dd>
+        <dt>Decisión</dt><dd>35 puntos</dd>
+        <dt>Junta</dt><dd>45 puntos (15 por especialista)</dd>
+      </dl>
+      <p>Con 70 o más el caso queda aprobado en tu expediente. Puedes repetir con datos nuevos las veces que quieras; se guarda tu mejor nota.</p>
+    </div>
+  </div></div>
+
+  <!-- ================= CASO 1 ================= -->
+  <section id="vista-caso1" class="wrap" style="gap:24px" hidden>
+    <button class="volver" id="volver" type="button">← Volver a los casos</button>
+
+    <div class="historia">
+      <aside class="ficha">
+        <p class="eyebrow">Historia clínica · ficticia</p>
+        <h3>Antonia R.</h3>
+        <dl>
+          <dt>Edad</dt><dd>3 días</dd>
+          <dt>Lugar</dt><dd>Hospital de segundo nivel, Pasto</dd>
+          <dt>Muestra</dt><dd>Gota de sangre del talón</dd>
+          <dt>Se mide</dt><dd>Fenilalanina (Phe), en mg/dL</dd>
+          <dt>Sospecha</dt><dd>Fenilcetonuria (PKU)</dd>
+        </dl>
+      </aside>
+      <div class="relato">
+        <p class="eyebrow">Caso 1</p>
+        <h2>Una gota que decide una llamada</h2>
+        <p>La fenilcetonuria es una condición genética en la que el cuerpo no procesa bien un aminoácido, la fenilalanina. Si se detecta en los primeros días, una dieta especial permite que el bebé crezca sano. Si no se detecta, el daño neurológico es irreversible.</p>
+        <p>Por eso a todos los recién nacidos se les mide la Phe. Tu trabajo, <span class="quien" id="quien">residente</span>, es fijar el <b>punto de corte</b>: por encima, se llama a la familia para confirmar; por debajo, se va a casa tranquila.</p>
+      </div>
+    </div>
+
+
+    <div>
+      <p class="eyebrow" style="margin-bottom:12px">Lámina · qué pasa en el cuerpo</p>
+      <div class="lamina">
+        <svg id="anat" viewBox="0 0 640 340" role="img" aria-label="Lámina esquemática: el hígado convierte fenilalanina en tirosina con la enzima PAH; con fenilcetonuria la enzima no funciona y la fenilalanina se acumula y llega al cerebro">
+          <!-- vaso sanguíneo -->
+          <path id="vaso" d="M40 300 C140 300 150 210 230 205 C330 198 360 230 420 200 C470 175 470 120 500 105" fill="none" stroke="var(--red)" stroke-opacity=".28" stroke-width="18" stroke-linecap="round"/>
+          <path d="M40 300 C140 300 150 210 230 205 C330 198 360 230 420 200 C470 175 470 120 500 105" fill="none" stroke="var(--red)" stroke-opacity=".55" stroke-width="1.2" stroke-dasharray="3 6"/>
+          <!-- hígado -->
+          <g transform="translate(120 70)" style="color:var(--fg)">
+            <path d="M10 48 C10 18 52 4 104 7 C156 10 186 16 192 32 C198 48 180 60 156 70 C126 84 104 106 74 122 C50 134 20 128 12 102 C6 84 8 64 10 48Z" fill="#1c2f31" stroke="currentColor" stroke-width="1.6"/>
+            <path class="org-lin" d="M104 9 C98 42 90 72 80 98" opacity=".5"/>
+            <ellipse cx="88" cy="110" rx="9" ry="13" fill="#24402f" stroke="currentColor" stroke-width="1.2" opacity=".8"/>
+            <text class="lbl" x="18" y="-8">HÍGADO</text>
+            <!-- ruta metabólica -->
+            <text class="lbl-b" x="30" y="52">Phe</text>
+            <path id="flecha" d="M62 48 L118 48" stroke="var(--h0)" stroke-width="2" marker-end="url(#pt)"/>
+            <text class="lbl" x="70" y="40" id="pahTxt">PAH</text>
+            <text class="lbl-b" x="124" y="52" id="tyr">Tirosina</text>
+            <g id="bloqueo" opacity="0"><path d="M80 38 L100 58 M100 38 L80 58" stroke="var(--red)" stroke-width="3" stroke-linecap="round"/></g>
+          </g>
+          <!-- cerebro (contorno generado) -->
+          <g transform="translate(520 92)">
+            <path id="cerebro" fill="#1c2f31" stroke="var(--fg)" stroke-width="1.6"/>
+            <path id="surcos" class="org-lin" style="color:var(--fg)" opacity=".45"/>
+            <ellipse cx="34" cy="44" rx="22" ry="14" fill="#1c2f31" stroke="var(--fg)" stroke-width="1.4"/>
+            <path class="org-lin" style="color:var(--fg)" d="M18 50 C16 66 14 80 12 92" />
+            <circle id="halo" cx="0" cy="0" r="70" fill="var(--red)" opacity="0"/>
+            <text class="lbl" x="-36" y="-70">CEREBRO</text>
+          </g>
+          <text class="lbl" x="36" y="326">SANGRE · desde la alimentación</text>
+          <defs><marker id="pt" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="6" markerHeight="6" orient="auto"><path d="M0 0 L10 5 L0 10Z" fill="var(--h0)"/></marker></defs>
+          <g id="particulas"></g>
+        </svg>
+        <div class="lado">
+          <div class="toggle" role="group" aria-label="Escenario">
+            <button class="s" id="tSano" type="button" aria-pressed="true">Sana · H₀</button>
+            <button class="e" id="tPku" type="button" aria-pressed="false">Con PKU · Hₐ</button>
+          </div>
+          <div class="medidor">
+            <span class="eyebrow">Phe en sangre</span>
+            <div><b id="phe">1.5</b> <span style="color:var(--muted);font-size:13px">mg/dL (media ilustrativa)</span></div>
+            <div class="barra"><i id="pheBar"></i></div>
+          </div>
+          <p id="anatTxt">En una bebé sana, la enzima PAH del hígado convierte la fenilalanina de la leche en tirosina. La Phe en sangre se queda baja: por eso la media bajo H₀ es μ₀ = 1.5.</p>
+        </div>
+      </div>
+    </div>
+
+    <details class="teoria" open><summary>Repaso de teoría</summary>
+    <div class="pasos">
+      <div class="paso">
+        <p class="eyebrow">Paso 1 · las hipótesis</p>
+        <h3>Antes de mirar el número, decimos qué estamos probando</h3>
+        <dl class="def">
+          <dt class="h0c">H₀</dt><dd><b>Hipótesis nula:</b> Antonia está sana. Su Phe viene de una normal con media <math><msub><mi>μ</mi><mn>0</mn></msub><mo>=</mo><mn>1.5</mn></math> mg/dL.</dd>
+          <dt class="hac">Hₐ</dt><dd><b>Hipótesis alternativa:</b> Antonia tiene PKU. Su Phe viene de una normal con media <math><msub><mi>μ</mi><mi>a</mi></msub><mo>=</mo><mn>3.5</mn></math> mg/dL.</dd>
+          <dt>σ</dt><dd>Desviación estándar de una medición: <math><mi>σ</mi><mo>=</mo><mn>0.6</mn></math> mg/dL en ambos casos (el laboratorio tiene ese ruido).</dd>
+          <dt>n</dt><dd>Número de mediciones repetidas de la misma muestra.</dd>
+          <dt>X̄</dt><dd>El promedio de esas n mediciones. Es lo que realmente comparamos con el corte.</dd>
+        </dl>
+      </div>
+
+      <div class="paso">
+        <p class="eyebrow">Paso 2 · la región de rechazo</p>
+        <h3>Rechazamos H₀ si el promedio supera el corte k</h3>
+        <div class="formula">
+          <math display="block"><mtext>RR</mtext><mo>=</mo><mo>{</mo><mover><mi>X</mi><mo>‾</mo></mover><mo>&gt;</mo><mi>k</mi><mo>}</mo></math>
+        </div>
+        <p>Y el promedio de n mediciones tiene menos ruido que una sola: su desviación es <math><mfrac><mi>σ</mi><msqrt><mi>n</mi></msqrt></mfrac></math>. Por eso repetir la medición junta las campanas.</p>
+      </div>
+
+      <div class="paso">
+        <p class="eyebrow">Paso 3 · los dos errores</p>
+        <h3>Toda regla se equivoca de dos maneras</h3>
+        <dl class="def">
+          <dt class="h0c">α</dt><dd><b>Error tipo I (falso positivo):</b> Antonia está sana y la llamamos igual. Susto para la familia, un examen extra.
+            <div class="formula" style="margin-top:8px"><math display="block"><mi>α</mi><mo>=</mo><mi>P</mi><mo>(</mo><mover><mi>X</mi><mo>‾</mo></mover><mo>&gt;</mo><mi>k</mi><mo>∣</mo><msub><mi>μ</mi><mn>0</mn></msub><mo>)</mo><mo>=</mo><mn>1</mn><mo>−</mo><mi>Φ</mi><mrow><mo>(</mo><mfrac><mrow><mi>k</mi><mo>−</mo><msub><mi>μ</mi><mn>0</mn></msub></mrow><mrow><mi>σ</mi><mo>/</mo><msqrt><mi>n</mi></msqrt></mrow></mfrac><mo>)</mo></mrow></math></div></dd>
+          <dt class="hac">β</dt><dd><b>Error tipo II (falso negativo):</b> Antonia tiene PKU y la mandamos a casa. Aquí el costo es enorme.
+            <div class="formula" style="margin-top:8px"><math display="block"><mi>β</mi><mo>=</mo><mi>P</mi><mo>(</mo><mover><mi>X</mi><mo>‾</mo></mover><mo>≤</mo><mi>k</mi><mo>∣</mo><msub><mi>μ</mi><mi>a</mi></msub><mo>)</mo><mo>=</mo><mi>Φ</mi><mrow><mo>(</mo><mfrac><mrow><mi>k</mi><mo>−</mo><msub><mi>μ</mi><mi>a</mi></msub></mrow><mrow><mi>σ</mi><mo>/</mo><msqrt><mi>n</mi></msqrt></mrow></mfrac><mo>)</mo></mrow></math></div></dd>
+          <dt>1 − β</dt><dd><b>Potencia:</b> la probabilidad de detectar la PKU cuando sí está.</dd>
+          <dt>Φ</dt><dd>La función de distribución acumulada de la normal estándar (la tabla Z).</dd>
+        </dl>
+      </div>
+    </div>
+    </details>
+
+    <div>
+      <p class="eyebrow" style="margin-bottom:12px">Monitor de decisión · mueve el corte y el número de mediciones</p>
+      <div class="lab">
+        <div class="pantalla">
+          <canvas id="curvas" role="img" aria-label="Dos distribuciones normales del promedio de fenilalanina, una bajo H0 y otra bajo Ha, con las áreas de error alfa y beta sombreadas"></canvas>
+          <div class="leyenda">
+            <span><i style="background:var(--h0)"></i>Bebés sanos (H₀)</span>
+            <span><i style="background:var(--ha)"></i>Bebés con PKU (Hₐ)</span>
+            <span><i style="background:var(--h0);opacity:.45"></i>Área α</span>
+            <span><i style="background:var(--ha);opacity:.45"></i>Área β</span>
+          <span class="toque">Arrastra sobre la gráfica para mover el corte</span></div>
+        </div>
+        <div class="controles">
+          <div class="control">
+            <label for="k">Punto de corte k <output id="kOut">2.49 mg/dL</output></label>
+            <input id="k" type="range" min="1" max="4" step="0.01" value="2.49">
+            <small>Más a la derecha: menos falsos positivos, más falsos negativos.</small>
+          </div>
+          <div class="control">
+            <label for="n">Mediciones repetidas n <output id="nOut">1</output></label>
+            <input id="n" type="range" min="1" max="6" step="1" value="1">
+            <small>Más mediciones: el promedio es más preciso y las campanas se separan.</small>
+          </div>
+          <div class="lecturas">
+            <div class="lect a"><span class="eyebrow">α</span><b id="rA">0.050</b><span>falso +</span></div>
+            <div class="lect b"><span class="eyebrow">β</span><b id="rB">0.046</b><span>falso −</span></div>
+            <div class="lect p"><span class="eyebrow">1−β</span><b id="rP">0.954</b><span>potencia</span></div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <div class="meta" id="meta">
+      <span class="chip no" id="metaChip">Meta no cumplida</span>
+      <p><b>La junta te pide:</b> α ≤ 0.05 y β ≤ 0.01. Con una sola medición, ¿se puede? Si no, ¿cuántas necesitas? <span id="metaTxt" class="pista"></span></p>
+    </div>
+
+    <div>
+      <p class="eyebrow" style="margin-bottom:12px">Sala de neonatos · aplica tu regla a bebés simulados</p>
+      <div class="sala">
+        <div class="cuna">
+          <h3 class="h0c">100 bebés sanos</h3>
+          <div class="puntos" id="pSanos"></div>
+          <p class="res" id="resSanos">Cada punto rojo es una familia que recibe una llamada innecesaria.</p>
+        </div>
+        <div class="cuna">
+          <h3 class="hac">100 bebés con PKU</h3>
+          <div class="puntos" id="pPku"></div>
+          <p class="res" id="resPku">Cada punto rojo es un bebé que se va a casa sin diagnóstico.</p>
+        </div>
+      </div>
+      <div style="display:flex;gap:10px;margin-top:14px;flex-wrap:wrap">
+        <button class="btn" id="simular" type="button">Simular la sala</button>
+        <button class="btn sec" id="limpiar" type="button">Vaciar</button>
+      </div>
+    </div>
+
+    <div class="mision" id="caja1">
+      <div class="m-head"><div><p class="eyebrow">Tu decisión · ante la junta</p><h3>El resultado de Antonia</h3></div><button class="btn" id="c1antonia" type="button">Recibir el resultado de Antonia</button></div>
+      <div id="mis1"></div>
+    </div>
+
+    <p class="nota">Antonia y su historia son ficticias. Las medias y la desviación son ilustrativas para que las campanas se vean; los programas reales de tamizaje usan sus propios cortes y siempre confirman con un segundo examen.</p>
+  </section>
+
+  <!-- ================= CASO 2 ================= -->
+  <section id="vista-caso2" class="wrap" style="gap:24px" hidden>
+    <button class="volver" id="volver2" type="button">← Volver a los casos</button>
+
+    <div class="historia">
+      <aside class="ficha">
+        <p class="eyebrow">Historia comunitaria · ficticia</p>
+        <h3>Vereda La Esperanza</h3>
+        <dl>
+          <dt>Quién</dt><dd>Luz Marina, promotora de salud</dd>
+          <dt>Lugar</dt><dd>Zona rural de Casanare</dd>
+          <dt>Prueba</dt><dd>Serología: anticuerpos contra <i>Trypanosoma cruzi</i></dd>
+          <dt>Histórico</dt><dd>8 % de la vereda era seropositiva</dd>
+          <dt>Sospecha</dt><dd>Han visto más pitos en las casas</dd>
+        </dl>
+      </aside>
+      <div class="relato">
+        <p class="eyebrow">Caso 2</p>
+        <h2>¿Subió el Chagas en La Esperanza?</h2>
+        <p>La enfermedad de Chagas la causa un parásito, <i>Trypanosoma cruzi</i>, que transmite el pito (un chinche que vive en techos y paredes de algunas casas rurales). Muchas personas se infectan sin saberlo, y años después el parásito puede dañar el corazón.</p>
+        <p>Luz Marina dice que este año han encontrado más pitos. Si la proporción de personas infectadas subió, la Secretaría manda brigada de fumigación y tratamiento. Pero la brigada cuesta, y no se manda por una corazonada. <span class="quien" id="quien2">Residente</span>, a ti te toca la prueba.</p>
+      </div>
+    </div>
+
+    <div>
+      <p class="eyebrow" style="margin-bottom:12px">Lámina · el parásito y el corazón</p>
+      <div class="lamina">
+        <svg id="anat2" viewBox="0 0 640 340" role="img" aria-label="Lámina esquemática del corazón: sano, en fase aguda con parásitos en la sangre, y en fase crónica con el corazón agrandado">
+          <path id="orbita" d="M320 30 C470 30 560 110 560 180 C560 260 460 318 320 318 C180 318 80 260 80 180 C80 110 170 30 320 30Z" fill="none" stroke="var(--red)" stroke-opacity=".22" stroke-width="16"/>
+          <text class="lbl" x="96" y="60">TORRENTE SANGUÍNEO</text>
+          <g id="corazon" transform="translate(320 180)">
+            <g transform="rotate(-14) translate(-150 -150)">
+              <path id="cor-pared" d="M150 70 C120 40 70 45 60 95 C50 145 90 195 150 250 C210 195 250 150 240 100 C232 55 182 42 150 70Z" fill="#2a1a1c" stroke="var(--fg)" stroke-width="1.8"/>
+              <path class="org-lin" style="color:var(--fg)" d="M150 72 C148 30 190 16 214 38 C224 48 226 62 224 76" stroke-width="7" opacity=".9"/>
+              <path class="org-lin" style="color:var(--fg)" d="M128 78 C120 50 96 44 82 58" stroke-width="6" opacity=".75"/>
+              <path class="org-lin" style="color:var(--fg)" d="M194 64 L200 26" stroke-width="5" opacity=".6"/>
+              <path class="org-lin" style="color:var(--fg)" d="M150 92 C140 140 146 190 150 240" opacity=".5"/>
+              <path class="org-lin" style="color:var(--fg)" d="M70 122 C110 138 190 138 236 116" opacity=".5"/>
+              <text class="lbl" x="60" y="40">CORAZÓN</text>
+            </g>
+          </g>
+          <g id="parasitos"></g>
+        </svg>
+        <div class="lado">
+          <div class="toggle" role="group" aria-label="Fase">
+            <button class="s" id="f-sano" type="button" aria-pressed="true">Sano</button>
+            <button class="e" id="f-aguda" type="button" aria-pressed="false">Aguda</button>
+            <button class="e" id="f-cronica" type="button" aria-pressed="false">Crónica</button>
+          </div>
+          <p id="anat2Txt"></p>
+          <p style="font-size:13px">Para la prueba solo importa una cosa: la serología sale positiva en ambas fases. Cada persona es un "sí" o un "no", y por eso lo que estimamos es una <b style="color:var(--fg)">proporción</b>.</p>
+        </div>
+      </div>
+    </div>
+
+    <details class="teoria" open><summary>Repaso de teoría</summary>
+    <div class="pasos">
+      <div class="paso">
+        <p class="eyebrow">Paso 1 · qué estamos midiendo</p>
+        <h3>Cada persona es un ensayo de Bernoulli</h3>
+        <dl class="def">
+          <dt>p</dt><dd>La proporción real de personas infectadas en la vereda hoy. No la conocemos.</dd>
+          <dt>p₀</dt><dd>El valor histórico: <math><msub><mi>p</mi><mn>0</mn></msub><mo>=</mo><mn>0.08</mn></math>.</dd>
+          <dt>n</dt><dd>Cuántas personas examinamos.</dd>
+          <dt>Y</dt><dd>Cuántas de esas n salen positivas. <math><mi>Y</mi><mo>∼</mo><mtext>Binomial</mtext><mo>(</mo><mi>n</mi><mo>,</mo><mi>p</mi><mo>)</mo></math>.</dd>
+          <dt>p̂</dt><dd>La proporción en la muestra: <math><mover><mi>p</mi><mo>^</mo></mover><mo>=</mo><mfrac><mi>Y</mi><mi>n</mi></mfrac></math>. Es nuestro estimador de p.</dd>
+        </dl>
+      </div>
+      <div class="paso">
+        <p class="eyebrow">Paso 2 · las hipótesis</p>
+        <h3>Prueba de una cola: solo nos preocupa que haya subido</h3>
+        <div class="formula">
+          <math display="block"><msub><mi>H</mi><mn>0</mn></msub><mo>:</mo><mi>p</mi><mo>=</mo><mn>0.08</mn><mspace width="2em"/><msub><mi>H</mi><mi>a</mi></msub><mo>:</mo><mi>p</mi><mo>&gt;</mo><mn>0.08</mn></math>
+        </div>
+      </div>
+      <div class="paso">
+        <p class="eyebrow">Paso 3 · el estadístico</p>
+        <h3>Estandarizamos p̂ suponiendo que H₀ es cierta</h3>
+        <div class="formula">
+          <math display="block"><mi>Z</mi><mo>=</mo><mfrac><mrow><mover><mi>p</mi><mo>^</mo></mover><mo>−</mo><msub><mi>p</mi><mn>0</mn></msub></mrow><msqrt><mfrac><mrow><msub><mi>p</mi><mn>0</mn></msub><mo>(</mo><mn>1</mn><mo>−</mo><msub><mi>p</mi><mn>0</mn></msub><mo>)</mo></mrow><mi>n</mi></mfrac></msqrt></mfrac></math>
+        </div>
+        <dl class="def">
+          <dt>Abajo</dt><dd>Es el error estándar de p̂ <b>si H₀ fuera cierta</b>. Por eso va p₀ y no p̂.</dd>
+          <dt>¿Por qué normal?</dt><dd>Por el teorema del límite central: con n grande, p̂ es aproximadamente normal. Wackerly pide que <math><mi>n</mi><msub><mi>p</mi><mn>0</mn></msub></math> y <math><mi>n</mi><mo>(</mo><mn>1</mn><mo>−</mo><msub><mi>p</mi><mn>0</mn></msub><mo>)</mo></math> no sean pequeños.</dd>
+          <dt>z<sub>α</sub></dt><dd>El valor crítico: rechazamos H₀ si <math><mi>Z</mi><mo>&gt;</mo><msub><mi>z</mi><mi>α</mi></msub></math>. Con α = 0.05, <math><msub><mi>z</mi><mi>α</mi></msub><mo>=</mo><mn>1.645</mn></math>.</dd>
+          <dt>valor p</dt><dd>La probabilidad de ver un Z igual o más extremo que el observado, si H₀ es cierta: <math><mi>P</mi><mo>(</mo><mi>Z</mi><mo>≥</mo><msub><mi>z</mi><mtext>obs</mtext></msub><mo>)</mo></math>. Rechazamos si es menor que α (sección 10.6).</dd>
+          <dt>Exacto</dt><dd>La z es una aproximación. Como Y es binomial, también se puede calcular el valor p exacto: <math><mi>P</mi><mo>(</mo><mi>Y</mi><mo>≥</mo><msub><mi>y</mi><mtext>obs</mtext></msub><mo>∣</mo><mi>p</mi><mo>=</mo><msub><mi>p</mi><mn>0</mn></msub><mo>)</mo></math>. Con n pequeño pueden diferir; la app te muestra ambos para que compares.</dd>
+        </dl>
+      </div>
+    </div>
+    </details>
+
+    <div>
+      <p class="eyebrow" style="margin-bottom:12px">Configura el estudio</p>
+      <div class="lab">
+        <div class="dos">
+          <div class="pantalla">
+            <canvas id="c2z" role="img" aria-label="Distribución normal estándar del estadístico Z bajo H0, con la región de rechazo y el Z observado"></canvas>
+            <div class="leyenda"><span><i style="background:var(--h0)"></i>Z si H₀ es cierta</span><span><i style="background:var(--red);opacity:.5"></i>Región de rechazo</span><span class="toque">Toca la curva para ver P(cola)</span></div>
+          </div>
+          <div class="pantalla">
+            <canvas id="c2pot" role="img" aria-label="Curva de potencia de la prueba en función de la proporción real p"></canvas>
+            <div class="leyenda"><span><i style="background:var(--red)"></i>Potencia según el p real</span><span><i style="background:var(--muted)"></i>Nivel α</span></div>
+          </div>
+        </div>
+        <div class="controles">
+          <div class="control">
+            <label for="c2n">Personas examinadas n <output id="c2nOut">200</output></label>
+            <input id="c2n" type="range" min="40" max="800" step="10" value="200">
+          </div>
+          <div class="control">
+            <label>Nivel de significancia α</label>
+            <div class="alfas">
+              <label><input type="radio" name="c2a" value="0.01"><span>0.01</span></label>
+              <label><input type="radio" name="c2a" value="0.05" checked><span>0.05</span></label>
+              <label><input type="radio" name="c2a" value="0.1"><span>0.10</span></label>
+            </div>
+          </div>
+          <div class="oculto-jefe solo-jefe">Modo investigación: la prevalencia real está oculta. Solo conoces lo que digan tus datos.</div>
+          <div class="control verdad">
+            <label for="c2p">Prevalencia real (la verdad oculta) <output id="c2pOut">12 %</output></label>
+            <input id="c2p" type="range" min="4" max="20" step="1" value="12">
+            <small>En la vida real nadie conoce este número. Aquí lo fijas tú para ver qué tan seguido acierta la prueba.</small>
+          </div>
+          <div class="lecturas verdad" style="grid-template-columns:1fr 1fr">
+            <div class="lect p"><span class="eyebrow">Potencia</span><b id="c2pow">0.64</b><span>detectar el aumento</span></div>
+            <div class="lect b"><span class="eyebrow">β</span><b id="c2beta">0.36</b><span>no verlo</span></div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <div>
+      <p class="eyebrow" style="margin-bottom:12px">Trabajo de campo · cada punto es una persona examinada</p>
+      <div class="veredita">
+        <canvas id="c2gente" role="img" aria-label="Personas examinadas en la vereda; los puntos rojos son serologías positivas"></canvas>
+        <div class="info">
+          <div class="fila"><span>Positivos Y</span><b id="c2Y">—</b></div>
+          <div class="fila"><span>p̂ = Y / n</span><b id="c2ph">—</b></div>
+          <div class="fila"><span>Z observado</span><b id="c2zo">—</b></div>
+          <div class="fila"><span>valor p (aprox. normal)</span><b id="c2pv">—</b></div>
+          <div class="fila"><span>valor p exacto (binomial)</span><b id="c2pvx">—</b></div>
+          <div class="veredicto" id="c2ver">Sal a la vereda y toma la muestra.</div>
+        </div>
+      </div>
+      <div style="display:flex;gap:10px;margin-top:14px;flex-wrap:wrap">
+        <button class="btn" id="c2tomar" type="button">Tomar la muestra</button>
+        <button class="btn sec verdad" id="c2rep" type="button">Repetir en 200 veredas iguales</button>
+      </div>
+      <p class="repet" id="c2repTxt" style="margin-top:10px"></p>
+      <p class="repet pista solo-interno" style="margin-top:6px">Pista de la junta: con la prevalencia real en 10 %, prueba subiendo n de 100 en 100 y mira cuándo la potencia pasa de 0.8.</p>
+    </div>
+
+    <div class="mision" id="caja2">
+      <div class="m-head"><div><p class="eyebrow">Tu decisión · ante la junta</p><h3>¿Se pide la brigada?</h3></div></div>
+      <div id="mis2"></div>
+    </div>
+
+    <p class="nota">Luz Marina, la vereda La Esperanza y sus datos son ficticios. El 8 % histórico es ilustrativo. Casanare sí es una zona donde el Chagas ha sido endémico, y los programas reales combinan la serología con la búsqueda del vector en las viviendas.</p>
+  </section>
+
+  <!-- ================= CASO 3 ================= -->
+  <section id="vista-caso3" class="wrap" style="gap:24px" hidden>
+    <button class="volver" id="volver3" type="button">← Volver a los casos</button>
+
+    <div class="historia">
+      <aside class="ficha">
+        <p class="eyebrow">Historia clínica · ficticia</p>
+        <h3>Valentina M.</h3>
+        <dl>
+          <dt>Edad</dt><dd>29 años</dd>
+          <dt>Oficio</dt><dd>Diseñadora gráfica</dd>
+          <dt>Diagnóstico</dt><dd>Lupus eritematoso sistémico, desde los 22</dd>
+          <dt>Estudio</dt><dd>Ensayo clínico aleatorizado, con consentimiento informado</dd>
+          <dt>Se mide</dt><dd>Cuánto baja el puntaje de actividad del lupus en 12 semanas</dd>
+        </dl>
+      </aside>
+      <div class="relato">
+        <p class="eyebrow">Caso 3</p>
+        <h2>¿El tratamiento nuevo sí funciona mejor?</h2>
+        <p>El lupus es una enfermedad autoinmune: el sistema de defensa, que debería atacar virus y bacterias, se confunde y ataca tejidos del propio cuerpo. Llega en brotes, con temporadas de calma en medio. Valentina sabe cuándo viene uno: le duelen las manos, se cansa más de lo normal y le sale una mancha en las mejillas.</p>
+        <p>Ella se inscribió en un ensayo. A la mitad de las personas les tocó el tratamiento nuevo y a la otra mitad el tratamiento estándar, por sorteo. Nadie recibe "nada": comparar contra lo que ya funciona es lo ético. <span class="quien" id="quien3">Residente</span>, la junta quiere saber si la diferencia entre los grupos es real.</p>
+      </div>
+    </div>
+
+    <div>
+      <p class="eyebrow" style="margin-bottom:12px">Lámina · cuando las defensas se confunden</p>
+      <div class="lamina">
+        <svg id="anat3" viewBox="0 0 640 380" role="img" aria-label="Lámina esquemática de un cuerpo: anticuerpos que atacan la piel de la cara, las articulaciones, los riñones, el corazón y los pulmones durante un brote de lupus">
+          <g transform="translate(320 0)" fill="none" stroke="var(--fg)" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round">
+            <circle cx="0" cy="52" r="30" fill="#14262a"/>
+            <path d="M-12 82 L-12 94 M12 82 L12 94" />
+            <path d="M-12 94 C-40 96 -62 104 -66 124 L-80 220 L-74 292 M12 94 C40 96 62 104 66 124 L80 220 L74 292" />
+            <path d="M-48 122 L-44 230 C-44 250 -30 262 -26 270 L-30 366 M48 122 L44 230 C44 250 30 262 26 270 L30 366" />
+            <path d="M-26 270 C-14 280 14 280 26 270" opacity=".6"/>
+            <path d="M0 270 L0 366 M-8 366 L-30 366 M8 366 L30 366" opacity=".6"/>
+            <path class="cuerpo-org org3" data-o="piel" d="M-4 56 C-10 46 -22 44 -24 52 C-26 60 -14 64 -4 60 Z M4 56 C10 46 22 44 24 52 C26 60 14 64 4 60 Z" fill="transparent" stroke-width="1.3"/>
+            <path class="cuerpo-org org3" data-o="pulmon" d="M-8 116 C-26 112 -38 128 -38 156 C-38 176 -26 182 -10 176 Z M8 116 C26 112 38 128 38 156 C38 176 26 182 10 176 Z" fill="transparent" stroke-width="1.2"/>
+            <path class="cuerpo-org org3" data-o="corazon" d="M2 146 C-2 138 -16 138 -16 150 C-16 162 -4 170 4 176 C10 170 20 162 18 150 C16 140 6 140 2 146 Z" fill="transparent" stroke-width="1.3"/>
+            <path class="cuerpo-org org3" data-o="rinon" d="M-22 200 C-32 200 -36 212 -34 222 C-32 234 -22 238 -18 230 C-16 224 -20 220 -18 214 C-16 208 -14 200 -22 200 Z M22 200 C32 200 36 212 34 222 C32 234 22 238 18 230 C16 224 20 220 18 214 C16 208 14 200 22 200 Z" fill="transparent" stroke-width="1.3"/>
+            <g class="org3" data-o="articulacion">
+              <circle class="cuerpo-org" cx="-66" cy="124" r="6"/><circle class="cuerpo-org" cx="66" cy="124" r="6"/>
+              <circle class="cuerpo-org" cx="-80" cy="220" r="6"/><circle class="cuerpo-org" cx="80" cy="220" r="6"/>
+              <circle class="cuerpo-org" cx="-74" cy="292" r="7"/><circle class="cuerpo-org" cx="74" cy="292" r="7"/>
+              <circle class="cuerpo-org" cx="-28" cy="318" r="6"/><circle class="cuerpo-org" cx="28" cy="318" r="6"/>
+            </g>
+          </g>
+          <g font-family="IBM Plex Mono, monospace" font-size="11" fill="var(--muted)" letter-spacing=".06em">
+            <text x="20" y="52"><tspan fill="var(--fg)">PIEL</tspan><tspan x="20" dy="15">mancha en alas</tspan><tspan x="20" dy="14">de mariposa</tspan></text><path d="M150 54 H294" stroke="var(--line)"/>
+            <text x="20" y="146"><tspan fill="var(--fg)">PULMONES</tspan><tspan x="20" dy="15">inflamación</tspan></text><path d="M150 148 H290" stroke="var(--line)"/>
+            <text x="20" y="288"><tspan fill="var(--fg)">ARTICULACIONES</tspan><tspan x="20" dy="15">dolor e hinchazón</tspan></text><path d="M150 290 H236" stroke="var(--line)"/>
+            <text x="470" y="160"><tspan fill="var(--fg)">CORAZÓN</tspan><tspan x="470" dy="15">pericardio</tspan></text><path d="M338 162 H462" stroke="var(--line)"/>
+            <text x="470" y="220"><tspan fill="var(--fg)">RIÑONES</tspan><tspan x="470" dy="15">nefritis lúpica</tspan></text><path d="M356 222 H462" stroke="var(--line)"/>
+          </g>
+          <g id="anticuerpos"></g>
+        </svg>
+        <div class="lado">
+          <div class="toggle" role="group" aria-label="Estado">
+            <button class="s" id="l-calma" type="button" aria-pressed="true">Calma</button>
+            <button class="e" id="l-brote" type="button" aria-pressed="false">Brote</button>
+          </div>
+          <p id="anat3Txt"></p>
+          <p style="font-size:13px">Los médicos resumen todo esto en un <b style="color:var(--fg)">puntaje de actividad</b>: entre más órganos afectados y más fuerte, más alto. En el ensayo medimos cuánto baja ese puntaje en cada persona. Ese número es nuestra variable Y.</p>
+        </div>
+      </div>
+    </div>
+
+    <details class="teoria" open><summary>Repaso de teoría</summary>
+    <div class="pasos">
+      <div class="paso">
+        <p class="eyebrow">Paso 1 · dos grupos, dos medias</p>
+        <h3>Comparamos el promedio de mejoría entre grupos</h3>
+        <dl class="def">
+          <dt class="hac">μ₁</dt><dd>Mejoría media real (cuánto baja el puntaje) con el tratamiento <b>nuevo</b>.</dd>
+          <dt class="h0c">μ₂</dt><dd>Mejoría media real con el tratamiento <b>estándar</b>.</dd>
+          <dt>n₁, n₂</dt><dd>Cuántas personas hay en cada grupo.</dd>
+          <dt>Ȳ₁, Ȳ₂</dt><dd>Las medias de mejoría en cada muestra.</dd>
+          <dt>S₁², S₂²</dt><dd>Las varianzas de cada muestra.</dd>
+        </dl>
+        <div class="formula"><math display="block"><msub><mi>H</mi><mn>0</mn></msub><mo>:</mo><msub><mi>μ</mi><mn>1</mn></msub><mo>−</mo><msub><mi>μ</mi><mn>2</mn></msub><mo>=</mo><mn>0</mn><mspace width="2em"/><msub><mi>H</mi><mi>a</mi></msub><mo>:</mo><msub><mi>μ</mi><mn>1</mn></msub><mo>−</mo><msub><mi>μ</mi><mn>2</mn></msub><mo>&gt;</mo><mn>0</mn></math></div>
+      </div>
+      <div class="paso">
+        <p class="eyebrow">Paso 2 · por qué t y no z</p>
+        <h3>No conocemos σ, y las muestras son pequeñas</h3>
+        <p>En el caso 1 conocíamos σ. Aquí no: hay que estimarla con los datos. Wackerly (sección 10.8) supone que ambos grupos son normales con la <b>misma varianza</b> σ², y la estima juntando las dos muestras:</p>
+        <div class="formula"><math display="block"><msubsup><mi>S</mi><mi>p</mi><mn>2</mn></msubsup><mo>=</mo><mfrac><mrow><mo>(</mo><msub><mi>n</mi><mn>1</mn></msub><mo>−</mo><mn>1</mn><mo>)</mo><msubsup><mi>S</mi><mn>1</mn><mn>2</mn></msubsup><mo>+</mo><mo>(</mo><msub><mi>n</mi><mn>2</mn></msub><mo>−</mo><mn>1</mn><mo>)</mo><msubsup><mi>S</mi><mn>2</mn><mn>2</mn></msubsup></mrow><mrow><msub><mi>n</mi><mn>1</mn></msub><mo>+</mo><msub><mi>n</mi><mn>2</mn></msub><mo>−</mo><mn>2</mn></mrow></mfrac></math></div>
+        <dl class="def">
+          <dt>S<sub>p</sub>²</dt><dd>Varianza combinada ("pooled"): un promedio ponderado de las dos varianzas, donde pesa más el grupo con más datos.</dd>
+        </dl>
+      </div>
+      <div class="paso">
+        <p class="eyebrow">Paso 3 · el estadístico</p>
+        <h3>Diferencia de medias dividida por su error estándar estimado</h3>
+        <div class="formula"><math display="block"><mi>T</mi><mo>=</mo><mfrac><mrow><msub><mover><mi>Y</mi><mo>‾</mo></mover><mn>1</mn></msub><mo>−</mo><msub><mover><mi>Y</mi><mo>‾</mo></mover><mn>2</mn></msub><mo>−</mo><mn>0</mn></mrow><mrow><msub><mi>S</mi><mi>p</mi></msub><msqrt><mfrac><mn>1</mn><msub><mi>n</mi><mn>1</mn></msub></mfrac><mo>+</mo><mfrac><mn>1</mn><msub><mi>n</mi><mn>2</mn></msub></mfrac></msqrt></mrow></mfrac></math></div>
+        <dl class="def">
+          <dt>gl</dt><dd>Si H₀ es cierta, T sigue una t de Student con <math><msub><mi>n</mi><mn>1</mn></msub><mo>+</mo><msub><mi>n</mi><mn>2</mn></msub><mo>−</mo><mn>2</mn></math> grados de libertad.</dd>
+          <dt>t<sub>α</sub></dt><dd>Valor crítico de esa t. Rechazamos H₀ si <math><mi>T</mi><mo>&gt;</mo><msub><mi>t</mi><mi>α</mi></msub></math>.</dd>
+          <dt>Colas</dt><dd>La t tiene colas más pesadas que la normal: con pocos datos hay más incertidumbre, así que el corte queda más lejos. Con muchos datos se parece a la z.</dd>
+        </dl>
+      </div>
+      <div class="paso">
+        <p class="eyebrow">Paso 4 · el intervalo de confianza</p>
+        <h3>La prueba y el intervalo dicen lo mismo, pero el intervalo dice más</h3>
+        <div class="formula"><math display="block"><mi>L</mi><mo>=</mo><mo>(</mo><msub><mover><mi>Y</mi><mo>‾</mo></mover><mn>1</mn></msub><mo>−</mo><msub><mover><mi>Y</mi><mo>‾</mo></mover><mn>2</mn></msub><mo>)</mo><mo>−</mo><msub><mi>t</mi><mi>α</mi></msub><mspace width=".2em"/><msub><mi>S</mi><mi>p</mi></msub><msqrt><mfrac><mn>1</mn><msub><mi>n</mi><mn>1</mn></msub></mfrac><mo>+</mo><mfrac><mn>1</mn><msub><mi>n</mi><mn>2</mn></msub></mfrac></msqrt></math></div>
+        <dl class="def">
+          <dt>L</dt><dd>Límite inferior de confianza al (1 − α)·100 % para μ₁ − μ₂. Con esa confianza, la ventaja real es por lo menos L.</dd>
+          <dt>Dualidad</dt><dd>Rechazar H₀ con nivel α es exactamente lo mismo que obtener L &gt; 0 (sección 10.6). Despeja T &gt; t<sub>α</sub> y te sale.</dd>
+          <dt>MID</dt><dd>Mejoría mínima importante: el cambio más pequeño que a una persona con lupus le cambia la vida. Aquí, ilustrativo: <b>4 puntos</b>.</dd>
+          <dt>Ojo</dt><dd>Con muchas personas, una ventaja de 1 punto puede salir significativa (L &gt; 0) y aun así ser menor que la MID. <b>Significativo no quiere decir importante.</b> El intervalo es el que te lo muestra.</dd>
+        </dl>
+      </div>
+    </div>
+    </details>
+
+    <div>
+      <p class="eyebrow" style="margin-bottom:12px">Diseña el ensayo</p>
+      <div class="lab">
+        <div class="dos">
+          <div class="pantalla grupos">
+            <canvas id="c3grupos" role="img" aria-label="Mejoría de cada persona en los dos grupos del ensayo, con la media de cada grupo"></canvas>
+            <div class="leyenda"><span><i style="background:var(--red)"></i>Tratamiento nuevo</span><span><i style="background:var(--h0)"></i>Estándar</span></div>
+          </div>
+          <div class="pantalla grupos">
+            <canvas id="c3t" role="img" aria-label="Distribución t de Student bajo H0 con la región de rechazo y el T observado"></canvas>
+            <div class="leyenda"><span><i style="background:var(--fg)"></i>t con n₁+n₂−2 gl</span><span><i style="background:var(--muted)"></i>normal, para comparar</span><span class="toque">Toca la curva para ver P(cola)</span></div>
+          </div>
+        </div>
+        <div class="controles">
+          <div class="control">
+            <label for="c3n">Personas por grupo <output id="c3nOut">10</output></label>
+            <input id="c3n" type="range" min="4" max="120" step="1" value="10">
+          </div>
+          <div class="control">
+            <label>Nivel de significancia α</label>
+            <div class="alfas">
+              <label><input type="radio" name="c3a" value="0.01"><span>0.01</span></label>
+              <label><input type="radio" name="c3a" value="0.05" checked><span>0.05</span></label>
+              <label><input type="radio" name="c3a" value="0.1"><span>0.10</span></label>
+            </div>
+          </div>
+          <div class="oculto-jefe solo-jefe">Modo investigación: la ventaja real del tratamiento está oculta.</div>
+          <div class="control verdad">
+            <label for="c3d">Ventaja real del nuevo, μ₁ − μ₂ <output id="c3dOut">3.0 pts</output></label>
+            <input id="c3d" type="range" min="0" max="8" step="0.5" value="3">
+            <small>La verdad oculta. Con 0, el tratamiento nuevo es igual al estándar.</small>
+          </div>
+          <div class="control">
+            <label for="c3s">Variabilidad entre personas σ <output id="c3sOut">4.0 pts</output></label>
+            <input id="c3s" type="range" min="1" max="8" step="0.5" value="4">
+            <small>Cada cuerpo responde distinto. Entre más ruido, más difícil ver la ventaja.</small>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <div>
+      <p class="eyebrow" style="margin-bottom:12px">Resultados del ensayo</p>
+      <div class="veredita">
+        <div class="tabla3">
+          <span class="h"></span><span class="h hac">Nuevo</span><span class="h h0c">Estándar</span>
+          <span>n</span><b id="t3n1">—</b><b id="t3n2">—</b>
+          <span>Media Ȳ</span><b id="t3m1">—</b><b id="t3m2">—</b>
+          <span>Desv. S</span><b id="t3s1">—</b><b id="t3s2">—</b>
+        </div>
+        <div class="info">
+          <div class="fila"><span>S<sub>p</sub></span><b id="c3sp">—</b></div>
+          <div class="fila"><span>T observado</span><b id="c3to">—</b></div>
+          <div class="fila"><span>t<sub>α</sub> (gl)</span><b id="c3tc">—</b></div>
+          <div class="fila"><span>valor p</span><b id="c3pv">—</b></div>
+          <div class="veredicto" id="c3ver">Corre el ensayo para ver los resultados.</div>
+        </div>
+      </div>
+      <div style="display:flex;gap:10px;margin-top:14px;flex-wrap:wrap">
+        <button class="btn" id="c3correr" type="button">Correr el ensayo</button>
+        <button class="btn sec verdad" id="c3rep" type="button">Repetir 500 ensayos iguales</button>
+      </div>
+      <p class="repet" id="c3repTxt" style="margin-top:10px"></p>
+      <p class="repet pista solo-interno" style="margin-top:6px">Pista de la junta: con la ventaja en 3 y σ en 4, un ensayo de 10 por grupo detecta el efecto apenas la mitad de las veces. ¿Cuántas personas por grupo hacen falta para pasar del 80 %? Y después prueba ventaja 1.5 con 120 por grupo: sale significativo, pero mira el intervalo contra la MID.</p>
+    </div>
+
+    <div class="mision" id="caja3">
+      <div class="m-head"><div><p class="eyebrow">Tu decisión · ante la junta</p><h3>¿El nuevo es mejor?</h3></div></div>
+      <div id="mis3"></div>
+    </div>
+
+    <p class="nota">Valentina, su historia y los datos del ensayo son ficticios. El puntaje de actividad aquí es una escala ilustrativa. Los ensayos reales de lupus usan índices validados, pasan por comités de ética y siempre piden consentimiento informado.</p>
+  </section>
+
+  <!-- ================= CASO 4 ================= -->
+  <section id="vista-caso4" class="wrap" style="gap:24px" hidden>
+    <button class="volver" id="volver4" type="button">← Volver a los casos</button>
+
+    <div class="historia">
+      <aside class="ficha">
+        <p class="eyebrow">Historia clínica · ficticia</p>
+        <h3>Aurelio P.</h3>
+        <dl>
+          <dt>Edad</dt><dd>68 años</dd>
+          <dt>Lugar</dt><dd>Puesto de salud rural, Boyacá</dd>
+          <dt>Oficio</dt><dd>Cultivador de papa, jubilado a medias</dd>
+          <dt>Condición</dt><dd>Hipertensión arterial, en control mensual</dd>
+          <dt>Problema</dt><dd>El tensiómetro nuevo le da números muy distintos cada vez</dd>
+        </dl>
+      </aside>
+      <div class="relato">
+        <p class="eyebrow">Caso 4</p>
+        <h2>Al tensiómetro le baila el número</h2>
+        <p>Don Aurelio va cada mes a tomarse la presión, y con ese número le ajustan la dosis. El mes pasado el aparato nuevo le marcó 150, luego 128, luego 141, todo en cinco minutos. Él se ríe: "¿Entonces cuál es la mía, doctora?".</p>
+        <p>Aquí no importa el promedio, importa la <b>dispersión</b>. Un aparato que en promedio acierta pero salta mucho no sirve para ajustar un medicamento. <span class="quien" id="quien4">Residente</span>, te toca probar si la varianza del aparato es aceptable.</p>
+      </div>
+    </div>
+
+    <div>
+      <p class="eyebrow" style="margin-bottom:12px">Lámina · cómo se mide la presión</p>
+      <div class="lamina">
+        <svg id="anat4" viewBox="0 0 640 340" role="img" aria-label="Lámina esquemática de un brazo con el brazalete del tensiómetro sobre la arteria braquial y un reloj que marca lecturas repetidas">
+          <g fill="none" stroke="var(--fg)" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round">
+            <path d="M20 120 C80 104 160 102 230 110 C262 114 280 124 300 132 C330 142 370 150 410 156 L438 158 C452 156 462 160 468 168 C474 176 470 186 460 188 L410 190 C370 192 330 192 296 196 C270 200 248 212 230 214 C160 222 80 222 20 214" />
+            <path d="M296 134 C306 150 306 180 296 196" opacity=".45"/>
+            <path d="M438 158 C446 164 448 176 440 186" opacity=".45"/>
+          </g>
+          <path id="arteria" d="M20 170 C90 162 170 162 236 166 C268 168 286 170 300 168 C340 166 380 170 430 172" fill="none" stroke="var(--red)" stroke-width="5" stroke-linecap="round" stroke-dasharray="14 10" opacity=".85"/>
+          <text class="lbl" x="24" y="240">ARTERIA BRAQUIAL</text>
+          <rect x="96" y="96" width="120" height="132" rx="14" fill="#16292d" fill-opacity=".85" stroke="var(--h0)" stroke-width="1.6"/>
+          <path d="M108 112 h96 M108 212 h96" stroke="var(--h0)" stroke-opacity=".4"/>
+          <text class="lbl" x="106" y="88">BRAZALETE</text>
+          <path d="M156 96 C156 60 230 40 300 52 C360 62 400 80 430 92" fill="none" stroke="var(--muted)" stroke-width="2.5"/>
+          <g transform="translate(520 110)">
+            <circle r="86" fill="#0e1c1f" stroke="var(--fg)" stroke-width="2"/>
+            <circle r="78" fill="none" stroke="var(--line)"/>
+            <g id="dialTicks"></g>
+            <g id="dialMarcas"></g>
+            <line id="aguja" x1="0" y1="0" x2="0" y2="-64" stroke="var(--red)" stroke-width="3" stroke-linecap="round"/>
+            <circle r="6" fill="var(--red)"/>
+            <text id="dialNum" y="40" text-anchor="middle" font-family="IBM Plex Mono, monospace" font-size="20" fill="var(--fg)">120</text>
+            <text y="56" text-anchor="middle" class="lbl">mmHg</text>
+          </g>
+          <text class="lbl" x="452" y="226">LECTURAS RECIENTES</text>
+          <text class="lbl" x="452" y="242" id="dialS">S = —</text>
+        </svg>
+        <div class="lado">
+          <div class="toggle" role="group" aria-label="Aparato">
+            <button class="s" id="d-manual" type="button" aria-pressed="true">Manual</button>
+            <button class="e" id="d-digital" type="button" aria-pressed="false">Digital barato</button>
+          </div>
+          <p id="anat4Txt"></p>
+          <p style="font-size:13px">Para probar el aparato sin molestar a Don Aurelio, se conecta a un simulador que siempre produce exactamente <b style="color:var(--fg)">120 mmHg</b>. Todo lo que se aleje de 120 es error del aparato.</p>
+        </div>
+      </div>
+    </div>
+
+    <details class="teoria" open><summary>Repaso de teoría</summary>
+    <div class="pasos">
+      <div class="paso">
+        <p class="eyebrow">Paso 1 · una varianza contra un estándar</p>
+        <h3>¿El aparato cumple la norma de precisión?</h3>
+        <dl class="def">
+          <dt>σ²</dt><dd>Varianza real de las lecturas del aparato digital. No la conocemos.</dd>
+          <dt>σ₀²</dt><dd>Lo máximo que permite la norma (ilustrativa): <math><msub><mi>σ</mi><mn>0</mn></msub><mo>=</mo><mn>8</mn></math> mmHg, o sea <math><msubsup><mi>σ</mi><mn>0</mn><mn>2</mn></msubsup><mo>=</mo><mn>64</mn></math>.</dd>
+          <dt>n</dt><dd>Número de lecturas en el simulador.</dd>
+          <dt>S²</dt><dd>Varianza muestral de esas lecturas.</dd>
+        </dl>
+        <div class="formula"><math display="block"><msub><mi>H</mi><mn>0</mn></msub><mo>:</mo><msup><mi>σ</mi><mn>2</mn></msup><mo>=</mo><mn>64</mn><mspace width="2em"/><msub><mi>H</mi><mi>a</mi></msub><mo>:</mo><msup><mi>σ</mi><mn>2</mn></msup><mo>&gt;</mo><mn>64</mn></math></div>
+        <div class="formula"><math display="block"><msup><mi>χ</mi><mn>2</mn></msup><mo>=</mo><mfrac><mrow><mo>(</mo><mi>n</mi><mo>−</mo><mn>1</mn><mo>)</mo><msup><mi>S</mi><mn>2</mn></msup></mrow><msubsup><mi>σ</mi><mn>0</mn><mn>2</mn></msubsup></mfrac></math></div>
+        <dl class="def">
+          <dt>Distribución</dt><dd>Si las lecturas son normales y H₀ es cierta, este estadístico sigue una chi-cuadrado con <math><mi>n</mi><mo>−</mo><mn>1</mn></math> grados de libertad (lo viste en el capítulo 7).</dd>
+          <dt>χ²<sub>α</sub></dt><dd>Rechazamos H₀ si <math><msup><mi>χ</mi><mn>2</mn></msup><mo>&gt;</mo><msubsup><mi>χ</mi><mi>α</mi><mn>2</mn></msubsup></math>. Ojo: la chi-cuadrado no es simétrica, así que la tabla se lee distinto que la z.</dd>
+        </dl>
+      </div>
+      <div class="paso">
+        <p class="eyebrow">Paso 2 · dos varianzas</p>
+        <h3>¿El digital es más disperso que el manual?</h3>
+        <dl class="def">
+          <dt class="hac">σ₁²</dt><dd>Varianza del aparato digital.</dd>
+          <dt class="h0c">σ₂²</dt><dd>Varianza del tensiómetro manual de toda la vida.</dd>
+        </dl>
+        <div class="formula"><math display="block"><msub><mi>H</mi><mn>0</mn></msub><mo>:</mo><msubsup><mi>σ</mi><mn>1</mn><mn>2</mn></msubsup><mo>=</mo><msubsup><mi>σ</mi><mn>2</mn><mn>2</mn></msubsup><mspace width="2em"/><msub><mi>H</mi><mi>a</mi></msub><mo>:</mo><msubsup><mi>σ</mi><mn>1</mn><mn>2</mn></msubsup><mo>&gt;</mo><msubsup><mi>σ</mi><mn>2</mn><mn>2</mn></msubsup><mspace width="2em"/><mi>F</mi><mo>=</mo><mfrac><msubsup><mi>S</mi><mn>1</mn><mn>2</mn></msubsup><msubsup><mi>S</mi><mn>2</mn><mn>2</mn></msubsup></mfrac></math></div>
+        <dl class="def">
+          <dt>Distribución</dt><dd>Si H₀ es cierta, F sigue una distribución F con <math><msub><mi>n</mi><mn>1</mn></msub><mo>−</mo><mn>1</mn></math> grados de libertad arriba y <math><msub><mi>n</mi><mn>2</mn></msub><mo>−</mo><mn>1</mn></math> abajo.</dd>
+          <dt>Idea</dt><dd>Si las varianzas son iguales, el cociente debería andar cerca de 1. Un F muy grande dice que el de arriba es más disperso.</dd>
+        </dl>
+      </div>
+      <div class="paso">
+        <p class="eyebrow">Paso 3 · ¿y si los datos no son normales?</p>
+        <h3>Las pruebas de varianza dependen mucho del supuesto de normalidad</h3>
+        <dl class="def">
+          <dt>Medias</dt><dd>Las pruebas de medias aguantan bastante que los datos no sean normales, gracias al teorema del límite central.</dd>
+          <dt>Varianzas</dt><dd>Las de varianza no. Si el aparato a veces da lecturas muy alejadas (colas pesadas), S² sale grande más seguido y la χ² rechaza mucho más que α, aunque σ sí cumpla la norma.</dd>
+          <dt>Pruébalo</dt><dd>Pon σ real del digital en 8, escoge "Colas pesadas" y repite muchas veces. La proporción de rechazos debería ser α, pero no lo es.</dd>
+        </dl>
+      </div>
+    </div>
+    </details>
+
+    <div>
+      <p class="eyebrow" style="margin-bottom:12px">Banco de pruebas</p>
+      <div class="lab">
+        <div class="dos">
+          <div class="pantalla">
+            <canvas id="c4chi" style="height:240px" role="img" aria-label="Distribución chi-cuadrado bajo H0 con la región de rechazo y el estadístico observado"></canvas>
+            <div class="leyenda"><span><i style="background:var(--fg)"></i>χ² con n − 1 gl</span><span><i style="background:var(--red);opacity:.5"></i>Rechazo</span><span class="toque">Toca la curva para ver P(cola)</span></div>
+          </div>
+          <div class="pantalla">
+            <canvas id="c4f" style="height:240px" role="img" aria-label="Distribución F bajo H0 con la región de rechazo y el estadístico observado"></canvas>
+            <div class="leyenda"><span><i style="background:var(--fg)"></i>F con (n − 1, n − 1) gl</span><span><i style="background:var(--red);opacity:.5"></i>Rechazo</span><span class="toque">Toca la curva para ver P(cola)</span></div>
+          </div>
+        </div>
+        <div class="controles">
+          <div class="control">
+            <label for="c4n">Lecturas por aparato n <output id="c4nOut">15</output></label>
+            <input id="c4n" type="range" min="4" max="40" step="1" value="15">
+          </div>
+          <div class="control">
+            <label>Nivel de significancia α</label>
+            <div class="alfas">
+              <label><input type="radio" name="c4a" value="0.01"><span>0.01</span></label>
+              <label><input type="radio" name="c4a" value="0.05" checked><span>0.05</span></label>
+              <label><input type="radio" name="c4a" value="0.1"><span>0.10</span></label>
+            </div>
+          </div>
+          <div class="oculto-jefe solo-jefe">Modo investigación: la precisión real de los dos aparatos está oculta.</div>
+          <div class="control verdad">
+            <label for="c4s1">σ real del digital <output id="c4s1Out">11 mmHg</output></label>
+            <input id="c4s1" type="range" min="3" max="16" step="0.5" value="11">
+            <small>La verdad oculta. La norma permite hasta 8.</small>
+          </div>
+          <div class="control verdad">
+            <label for="c4s2">σ real del manual <output id="c4s2Out">6 mmHg</output></label>
+            <input id="c4s2" type="range" min="3" max="16" step="0.5" value="6">
+          </div>
+          <div class="control">
+            <label>Forma de los errores</label>
+            <div class="alfas">
+              <label><input type="radio" name="c4forma" value="normal" checked><span>Normales</span></label>
+              <label><input type="radio" name="c4forma" value="pesadas"><span>Colas pesadas</span></label>
+            </div>
+            <small>Colas pesadas: de vez en cuando el aparato da una lectura muy loca. Misma σ, otra forma.</small>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <div>
+      <p class="eyebrow" style="margin-bottom:12px">Lecturas en el simulador de 120 mmHg</p>
+      <div class="pantalla"><canvas id="c4tira" role="img" aria-label="Lecturas de ambos aparatos alrededor de 120 mmHg"></canvas>
+        <div class="leyenda"><span><i style="background:var(--red)"></i>Digital</span><span><i style="background:var(--h0)"></i>Manual</span></div>
+      </div>
+      <div class="lecturas4" style="margin-top:14px">
+        <div class="info">
+          <h3>Prueba χ²: ¿cumple la norma?</h3>
+          <div class="fila"><span>S del digital</span><b id="c4S1">—</b></div>
+          <div class="fila"><span>χ² observado</span><b id="c4chio">—</b></div>
+          <div class="fila"><span>χ²<sub>α</sub> (gl)</span><b id="c4chic">—</b></div>
+          <div class="fila"><span>valor p</span><b id="c4chip">—</b></div>
+          <div class="veredicto" id="c4ver1">Toma las lecturas para ver el resultado.</div>
+        </div>
+        <div class="info">
+          <h3>Prueba F: digital contra manual</h3>
+          <div class="fila"><span>S del manual</span><b id="c4S2">—</b></div>
+          <div class="fila"><span>F observado</span><b id="c4fo">—</b></div>
+          <div class="fila"><span>F<sub>α</sub> (gl)</span><b id="c4fc">—</b></div>
+          <div class="fila"><span>valor p</span><b id="c4fp">—</b></div>
+          <div class="veredicto" id="c4ver2">Toma las lecturas para ver el resultado.</div>
+        </div>
+      </div>
+      <div style="display:flex;gap:10px;margin-top:14px;flex-wrap:wrap">
+        <button class="btn" id="c4medir" type="button">Tomar las lecturas</button>
+        <button class="btn sec verdad" id="c4rep" type="button">Repetir 500 bancos de prueba</button>
+      </div>
+      <p class="repet" id="c4repTxt" style="margin-top:10px"></p>
+      <p class="repet pista solo-interno" style="margin-top:6px">Pista de la junta: pon el σ real del digital en 8 (justo la norma) y repite. ¿Qué proporción de veces rechazas? Ese número tiene nombre.</p>
+    </div>
+
+    <div class="mision" id="caja4">
+      <div class="m-head"><div><p class="eyebrow">Tu decisión · ante la junta</p><h3>¿Sirve el tensiómetro?</h3></div></div>
+      <div id="mis4"></div>
+    </div>
+
+    <p class="nota">Don Aurelio y su historia son ficticios. La norma de σ₀ = 8 mmHg es ilustrativa, inspirada en cómo se validan los tensiómetros; los protocolos reales también revisan el error promedio y usan más mediciones.</p>
+  </section>
+</div>
+
+<script>
+(function(){
+  const $ = id => document.getElementById(id);
+  const MU0 = 1.5, MUA = 3.5, SIG = 0.6;
+  const reduce = matchMedia('(prefers-reduced-motion: reduce)').matches;
+
+  // --- matemática ---
+  function erf(x){ // Abramowitz-Stegun 7.1.26
+    const s = Math.sign(x); x = Math.abs(x);
+    const t = 1/(1+0.3275911*x);
+    const y = 1-(((((1.061405429*t-1.453152027)*t)+1.421413741)*t-0.284496736)*t+0.254829592)*t*Math.exp(-x*x);
+    return s*y;
+  }
+  const Phi = z => 0.5*(1+erf(z/Math.SQRT2));
+  const pdf = (x,m,s) => Math.exp(-0.5*((x-m)/s)**2)/(s*Math.sqrt(2*Math.PI));
+  function randn(){ let u=0,v=0; while(!u)u=Math.random(); while(!v)v=Math.random(); return Math.sqrt(-2*Math.log(u))*Math.cos(2*Math.PI*v); }
+
+  function errores(k,n){
+    const se = SIG/Math.sqrt(n);
+    const a = 1-Phi((k-MU0)/se), b = Phi((k-MUA)/se);
+    return {a,b,se};
+  }
+
+  // --- canvas util ---
+  function fit(c){
+    const r = c.getBoundingClientRect(), d = window.devicePixelRatio||1;
+    c.width = Math.max(1,r.width*d); c.height = Math.max(1,r.height*d);
+    const ctx = c.getContext('2d'); ctx.setTransform(d,0,0,d,0,0);
+    return {ctx,w:r.width,h:r.height};
+  }
+  const css = v => getComputedStyle(document.documentElement).getPropertyValue(v).trim();
+
+  // --- gráfica de campanas ---
+  function dibujar(){
+    const c = $('curvas'); if(!c.offsetParent) return;
+    const {ctx,w,h} = fit(c);
+    const k = +$('k').value, n = +$('n').value, {se} = errores(k,n);
+    const xmin=0, xmax=5.5, padL=36, padR=12, padT=16, padB=34;
+    const ymax = pdf(MU0,MU0,se)*1.12;
+    const X = x => padL+(x-xmin)/(xmax-xmin)*(w-padL-padR);
+    const Y = y => h-padB-(y/ymax)*(h-padT-padB);
+    const H0=css('--h0'), HA=css('--ha'), LINE=css('--line'), MUT=css('--muted'), FG=css('--fg');
+
+    ctx.clearRect(0,0,w,h);
+    // grilla
+    ctx.strokeStyle=LINE; ctx.lineWidth=1; ctx.fillStyle=MUT; ctx.font='12px "IBM Plex Mono", monospace'; ctx.textAlign='center';
+    for(let x=0;x<=5;x++){ ctx.globalAlpha=.5; ctx.beginPath(); ctx.moveTo(X(x),padT); ctx.lineTo(X(x),h-padB); ctx.stroke(); ctx.globalAlpha=1; ctx.fillText(x,X(x),h-padB+18); }
+    ctx.textAlign='right'; ctx.fillText('mg/dL',w-padR,h-4);
+    ctx.beginPath(); ctx.moveTo(padL,h-padB); ctx.lineTo(w-padR,h-padB); ctx.stroke();
+
+    function area(m,from,to,color){
+      ctx.beginPath(); ctx.moveTo(X(from),Y(0));
+      for(let x=from;x<=to;x+=0.01) ctx.lineTo(X(x),Y(pdf(x,m,se)));
+      ctx.lineTo(X(to),Y(0)); ctx.closePath();
+      ctx.fillStyle=color; ctx.globalAlpha=.38; ctx.fill(); ctx.globalAlpha=1;
+    }
+    area(MU0,k,xmax,H0);  // α
+    area(MUA,xmin,k,HA);  // β
+
+    function curva(m,color){
+      ctx.beginPath();
+      for(let x=xmin;x<=xmax;x+=0.01){ const px=X(x),py=Y(pdf(x,m,se)); x===xmin?ctx.moveTo(px,py):ctx.lineTo(px,py); }
+      ctx.strokeStyle=color; ctx.lineWidth=2.5; ctx.stroke();
+    }
+    curva(MU0,H0); curva(MUA,HA);
+
+    // corte
+    ctx.setLineDash([5,5]); ctx.strokeStyle=FG; ctx.lineWidth=1.5;
+    ctx.beginPath(); ctx.moveTo(X(k),padT); ctx.lineTo(X(k),h-padB); ctx.stroke(); ctx.setLineDash([]);
+    ctx.fillStyle=FG; ctx.textAlign = X(k)>w-80 ? 'right':'left';
+    ctx.fillText('k = '+k.toFixed(2), X(k)+(ctx.textAlign==='left'?6:-6), padT+12);
+    ctx.textAlign='center';
+    ctx.fillStyle=H0; ctx.fillText('μ₀', X(MU0), padT+12);
+    ctx.fillStyle=HA; ctx.fillText('μₐ', X(MUA), padT+12);
+  }
+
+  function actualizar(){
+    const k=+$('k').value, n=+$('n').value, {a,b}=errores(k,n);
+    $('kOut').textContent=k.toFixed(2)+' mg/dL'; $('nOut').textContent=n;
+    $('rA').textContent=a.toFixed(3); $('rB').textContent=b.toFixed(3); $('rP').textContent=(1-b).toFixed(3);
+    $('vA').textContent=a.toFixed(3); $('vB').textContent=b.toFixed(3); $('vN').textContent=n;
+    const ok = a<=0.05 && b<=0.01;
+    $('metaChip').className='chip '+(ok?'si':'no');
+    $('metaChip').textContent= ok?'Meta cumplida':'Meta no cumplida';
+    // ¿es posible con este n? el mejor k para α=0.05
+    const se=SIG/Math.sqrt(n), kOpt=MU0+1.645*se, bOpt=Phi((kOpt-MUA)/se);
+    $('metaTxt').textContent = ok ? 'Lo lograste: la clave fue subir n, no solo mover el corte.'
+      : (bOpt>0.01 ? 'Pista: con n = '+n+', aun con α justo en 0.05, β queda en '+bOpt.toFixed(3)+'. Mover k no alcanza.'
+                   : 'Con n = '+n+' sí se puede. Ahora busca el corte.');
+    dibujar();
+  }
+
+  // --- sala simulada ---
+  function grid(el){ el.innerHTML=''; for(let i=0;i<100;i++) el.appendChild(document.createElement('span')); }
+  function simular(){
+    const k=+$('k').value, n=+$('n').value, se=SIG/Math.sqrt(n);
+    const sanos=[...$('pSanos').children], pku=[...$('pPku').children];
+    let fp=0, fn=0;
+    sanos.forEach(s=>{ const pos = MU0+se*randn() > k; if(pos)fp++; s.className = pos?'mal':'ok'; });
+    pku.forEach(s=>{ const pos = MUA+se*randn() > k; if(!pos)fn++; s.className = pos?'okb':'mal'; });
+    $('resSanos').innerHTML='Falsos positivos: <b>'+fp+'</b> de 100 <span class="pista-exp">(lo esperado con tu α: '+(100*errores(k,n).a).toFixed(1)+')</span>.';
+    $('resPku').innerHTML='Falsos negativos: <b>'+fn+'</b> de 100 <span class="pista-exp">(lo esperado con tu β: '+(100*errores(k,n).b).toFixed(1)+')</span>.';
+  }
+  function limpiar(){
+    grid($('pSanos')); grid($('pPku'));
+    $('resSanos').textContent='Cada punto rojo es una familia que recibe una llamada innecesaria.';
+    $('resPku').textContent='Cada punto rojo es un bebé que se va a casa sin diagnóstico.';
+  }
+
+  // --- ECG ---
+  const ecg=$('ecg'); let t=0, pts=[];
+  function beat(p){ // forma de un latido, p en [0,1)
+    if(p<.10) return 0.08*Math.sin(p/.10*Math.PI);
+    if(p<.16) return 0;
+    if(p<.18) return -0.15;
+    if(p<.22) return 1;
+    if(p<.25) return -0.3;
+    if(p<.40) return 0;
+    if(p<.55) return 0.22*Math.sin((p-.40)/.15*Math.PI);
+    return 0;
+  }
+  function ecgFrame(){
+    const {ctx,w,h}=fit(ecg);
+    const N=Math.floor(w/2);
+    if(pts.length!==N){ pts=new Array(N).fill(0); }
+    const speed = reduce?0:3;
+    for(let s=0;s<speed;s++){ t+=1; pts.shift(); pts.push(beat((t%110)/110)); }
+    if(reduce){ for(let i=0;i<N;i++) pts[i]=beat((i%110)/110); }
+    ctx.clearRect(0,0,w,h);
+    ctx.strokeStyle=css('--line'); ctx.globalAlpha=.4;
+    for(let x=0;x<w;x+=24){ctx.beginPath();ctx.moveTo(x,0);ctx.lineTo(x,h);ctx.stroke();}
+    for(let y=0;y<h;y+=24){ctx.beginPath();ctx.moveTo(0,y);ctx.lineTo(w,y);ctx.stroke();}
+    ctx.globalAlpha=1;
+    const base=h*0.68, amp=h*0.52;
+    ctx.beginPath();
+    pts.forEach((v,i)=>{ const x=i*2, y=base-v*amp; i?ctx.lineTo(x,y):ctx.moveTo(x,y); });
+    ctx.strokeStyle=css('--red'); ctx.lineWidth=2; ctx.shadowColor=css('--red'); ctx.shadowBlur=8; ctx.stroke(); ctx.shadowBlur=0;
+    if(!reduce) requestAnimationFrame(ecgFrame);
+  }
+
+
+  // --- lámina anatómica ---
+  (function(){
+    // contorno de cerebro: elipse con ondulación (circunvoluciones)
+    let d='', sur='';
+    for(let i=0;i<=120;i++){
+      const t=i/120*2*Math.PI, r=1+0.05*Math.sin(11*t)+0.03*Math.sin(23*t);
+      const x=Math.cos(t)*78*r, y=Math.sin(t)*58*r - (Math.sin(t)>0.3?0:0);
+      d+=(i?'L':'M')+x.toFixed(1)+' '+y.toFixed(1);
+    }
+    $('cerebro').setAttribute('d',d+'Z');
+    sur='M-60 -20 C-40 -40 -20 -10 0 -30 C20 -50 40 -20 60 -32 M-55 10 C-35 -6 -15 22 10 4 C30 -10 45 18 62 6 M-30 34 C-10 20 10 44 34 30';
+    $('surcos').setAttribute('d',sur);
+
+    const vaso=$('vaso'), L=vaso.getTotalLength(), g=$('particulas');
+    const NS='http://www.w3.org/2000/svg';
+    let modo='sano', parts=[], last=0;
+    const hig = vaso.getPointAtLength(L*0.36); // punto donde pasa por el hígado (aprox)
+    function nueva(){
+      const c=document.createElementNS(NS,'circle'); c.setAttribute('r',4.5); g.appendChild(c);
+      parts.push({el:c,s:0,v:0.0018+Math.random()*0.0012, conv:false});
+    }
+    function setModo(m){
+      modo=m;
+      $('tSano').setAttribute('aria-pressed',m==='sano'); $('tPku').setAttribute('aria-pressed',m==='pku');
+      $('bloqueo').setAttribute('opacity', m==='pku'?1:0);
+      $('flecha').setAttribute('stroke-opacity', m==='pku'?.25:1);
+      $('tyr').setAttribute('opacity', m==='pku'?.35:1);
+      $('phe').textContent = m==='pku'?'3.5':'1.5';
+      $('pheBar').style.width = m==='pku'?'70%':'30%';
+      $('pheBar').style.background = m==='pku'?css('--red'):css('--h0');
+      $('anatTxt').textContent = m==='pku'
+        ? 'Con fenilcetonuria, la enzima PAH no funciona. La Phe no se convierte, se acumula en la sangre y llega al cerebro, donde es tóxica para el desarrollo. Por eso la media bajo Hₐ es μₐ = 3.5.'
+        : 'En una bebé sana, la enzima PAH del hígado convierte la fenilalanina de la leche en tirosina. La Phe en sangre se queda baja: por eso la media bajo H₀ es μ₀ = 1.5.';
+    }
+    $('tSano').addEventListener('click',()=>setModo('sano'));
+    $('tPku').addEventListener('click',()=>setModo('pku'));
+    setModo('sano');
+
+    let acumulado=0;
+    function frame(ts){
+      const dt = Math.min(50, ts-(last||ts)); last=ts;
+      if(document.getElementById('vista-caso1').hidden){ requestAnimationFrame(frame); return; }
+      if(Math.random() < (modo==='pku'?0.09:0.06)) nueva();
+      const H0=css('--h0'), RED=css('--red'), TY='#9ad1ff';
+      parts = parts.filter(p=>{
+        p.s += p.v*dt/16;
+        if(modo==='sano' && !p.conv && p.s>0.36){ p.conv=true; }
+        const fin = (modo==='sano' && p.conv) ? 0.62 : 1;
+        if(p.s>=fin){ p.el.remove(); if(modo==='pku') acumulado=Math.min(1,acumulado+0.02); return false; }
+        const pt=vaso.getPointAtLength(L*p.s);
+        p.el.setAttribute('cx',pt.x); p.el.setAttribute('cy',pt.y);
+        p.el.setAttribute('fill', p.conv?TY:(modo==='pku'?RED:H0));
+        p.el.setAttribute('opacity', (modo==='sano'&&p.conv)? Math.max(0,1-(p.s-0.36)/0.26) : 1);
+        return true;
+      });
+      if(modo==='sano') acumulado=Math.max(0,acumulado-0.01);
+      $('halo').setAttribute('opacity', (acumulado*0.35).toFixed(3));
+      if(!reduce) requestAnimationFrame(frame);
+    }
+    if(!reduce) requestAnimationFrame(frame);
+  })();
+
+
+  // ================= CASO 2 =================
+  const P0=0.08, ZC={'0.01':2.326,'0.05':1.645,'0.1':1.282};
+  let c2ult=null;
+  const c2v = () => ({n:+$('c2n').value, a:document.querySelector('input[name=c2a]:checked').value, p:+$('c2p').value/100});
+  function binomCola(y,n,p){ let s=0; for(let k=y;k<=n;k++) s+=Math.exp(lgam(n+1)-lgam(k+1)-lgam(n-k+1)+k*Math.log(p)+(n-k)*Math.log(1-p)); return Math.min(1,s); }
+  function c2pot(p,n,a){ const se0=Math.sqrt(P0*(1-P0)/n), crit=P0+ZC[a]*se0, se=Math.sqrt(p*(1-p)/n); return 1-Phi((crit-p)/se); }
+  function c2dibZ(){
+    const c=$('c2z'); if(!c.offsetParent) return;
+    const {ctx,w,h}=fit(c), {a}=c2v(), zc=ZC[a];
+    const xmin=-4,xmax=6,padL=14,padR=12,padT=16,padB=30, ymax=0.45;
+    const X=x=>padL+(x-xmin)/(xmax-xmin)*(w-padL-padR), Y=y=>h-padB-y/ymax*(h-padT-padB);
+    const H0=css('--h0'),RED=css('--red'),LINE=css('--line'),MUT=css('--muted'),FG=css('--fg');
+    ctx.clearRect(0,0,w,h); ctx.font='12px "IBM Plex Mono", monospace'; ctx.textAlign='center';
+    ctx.strokeStyle=LINE; ctx.fillStyle=MUT;
+    for(let x=-4;x<=6;x+=2){ ctx.globalAlpha=.5; ctx.beginPath(); ctx.moveTo(X(x),padT); ctx.lineTo(X(x),h-padB); ctx.stroke(); ctx.globalAlpha=1; ctx.fillText(x,X(x),h-padB+18); }
+    ctx.beginPath(); ctx.moveTo(X(zc),Y(0)); for(let x=zc;x<=xmax;x+=.02) ctx.lineTo(X(x),Y(pdf(x,0,1))); ctx.lineTo(X(xmax),Y(0)); ctx.closePath();
+    ctx.fillStyle=RED; ctx.globalAlpha=.4; ctx.fill(); ctx.globalAlpha=1;
+    ctx.beginPath(); for(let x=xmin;x<=xmax;x+=.02){ const px=X(x),py=Y(pdf(x,0,1)); x===xmin?ctx.moveTo(px,py):ctx.lineTo(px,py);} ctx.strokeStyle=H0; ctx.lineWidth=2.5; ctx.stroke();
+    if(!(est.nivel==='jefe' && !REV[2])){ ctx.fillStyle=RED; ctx.textAlign='left'; ctx.fillText('z_α = '+zc, X(zc)+4, Y(0.12)); }
+    if(c2ult && REV[2]){
+      const zo=Math.max(xmin,Math.min(xmax,c2ult.z));
+      ctx.strokeStyle=FG; ctx.lineWidth=2; ctx.setLineDash([5,4]); ctx.beginPath(); ctx.moveTo(X(zo),padT+14); ctx.lineTo(X(zo),h-padB); ctx.stroke(); ctx.setLineDash([]);
+      ctx.fillStyle=FG; ctx.textAlign= X(zo)>w-90?'right':'left'; ctx.fillText('z obs = '+c2ult.z.toFixed(2), X(zo)+(ctx.textAlign==='left'?5:-5), padT+10);
+    }
+    c._map={xmin,xmax,padL,padR,nom:'Z',tail:x=>1-Phi(x)}; probeDraw(c,ctx,X,h,padT,padB,2);
+  }
+  function c2dibPot(){
+    const c=$('c2pot'); if(!c.offsetParent) return;
+    const {ctx,w,h}=fit(c), {n,a,p}=c2v();
+    const xmin=.04,xmax=.20,padL=34,padR=12,padT=14,padB=30;
+    const X=x=>padL+(x-xmin)/(xmax-xmin)*(w-padL-padR), Y=y=>h-padB-y*(h-padT-padB);
+    const RED=css('--red'),LINE=css('--line'),MUT=css('--muted'),FG=css('--fg'),H0=css('--h0');
+    ctx.clearRect(0,0,w,h); ctx.font='12px "IBM Plex Mono", monospace'; ctx.strokeStyle=LINE; ctx.fillStyle=MUT;
+    ctx.textAlign='center'; for(let x=.04;x<=.2001;x+=.04){ ctx.globalAlpha=.5; ctx.beginPath(); ctx.moveTo(X(x),padT); ctx.lineTo(X(x),h-padB); ctx.stroke(); ctx.globalAlpha=1; ctx.fillText(Math.round(x*100)+'%',X(x),h-padB+18); }
+    ctx.textAlign='right'; for(let y=0;y<=1;y+=.5){ ctx.globalAlpha=.5; ctx.beginPath(); ctx.moveTo(padL,Y(y)); ctx.lineTo(w-padR,Y(y)); ctx.stroke(); ctx.globalAlpha=1; ctx.fillText(y.toFixed(1),padL-6,Y(y)+4); }
+    ctx.setLineDash([4,4]); ctx.strokeStyle=MUT; ctx.beginPath(); ctx.moveTo(padL,Y(+a)); ctx.lineTo(w-padR,Y(+a)); ctx.stroke();
+    ctx.strokeStyle=H0; ctx.beginPath(); ctx.moveTo(X(P0),padT); ctx.lineTo(X(P0),h-padB); ctx.stroke(); ctx.setLineDash([]);
+    ctx.fillStyle=H0; ctx.textAlign='left'; ctx.fillText('p₀',X(P0)+4,padT+10);
+    ctx.beginPath(); for(let x=xmin;x<=xmax+1e-9;x+=.002){ const px=X(x),py=Y(c2pot(x,n,a)); x===xmin?ctx.moveTo(px,py):ctx.lineTo(px,py);} ctx.strokeStyle=RED; ctx.lineWidth=2.5; ctx.stroke();
+    if(est.nivel!=='jefe'){ const pw=c2pot(p,n,a); ctx.beginPath(); ctx.arc(X(p),Y(pw),5,0,7); ctx.fillStyle=FG; ctx.fill(); }
+  }
+  function c2dibGente(){
+    const c=$('c2gente'); if(!c.offsetParent) return;
+    const {n}=c2v(), {ctx,w,h}=fit(c);
+    const cols=Math.ceil(Math.sqrt(n*w/h)), rows=Math.ceil(n/cols), cw=w/cols, ch=h/rows, r=Math.max(1.5,Math.min(cw,ch)*0.32);
+    ctx.clearRect(0,0,w,h);
+    const LINE=css('--line'),RED=css('--red');
+    for(let i=0;i<n;i++){
+      const x=(i%cols+.5)*cw, y=(Math.floor(i/cols)+.5)*ch;
+      const pos = c2ult && c2ult.v[i];
+      ctx.beginPath(); ctx.arc(x,y,r,0,7); ctx.fillStyle= pos?RED:(c2ult?'#3b5a58':LINE); ctx.fill();
+    }
+  }
+  function c2act(){
+    const {n,a,p}=c2v(), pw=c2pot(p,n,a);
+    if(c2ult && (c2ult.n!==n || c2ult.p!==p)){ c2ult=null; MIS[2]&&MIS[2].reset(); }
+    if(SIM[2] && (n!==simKey[2].n || p!==simKey[2].p || a!==simKey[2].a)){ SIM[2].reset(); } simKey[2]={n,p,a};
+    $('c2nOut').textContent=n; $('c2pOut').textContent=Math.round(p*100)+' %';
+    $('c2pow').textContent=pw.toFixed(2); $('c2beta').textContent=(1-pw).toFixed(2);
+    $('vA').textContent=(+a).toFixed(2); $('vB').textContent=(1-pw).toFixed(3); $('vN').textContent=n;
+    c2res();
+    c2dibZ(); c2dibPot(); c2dibGente();
+  }
+  function c2res(){
+    if(!c2ult){ ['c2Y','c2ph','c2zo','c2pv','c2pvx'].forEach(i=>$(i).textContent='—'); $('c2ver').className='veredicto'; $('c2ver').textContent='Sal a la vereda y toma la muestra.'; return; }
+    const {y,n,ph,z,pv,a}=c2ult;
+    $('c2Y').textContent=y+' de '+n; $('c2ph').textContent=ph.toFixed(3);
+    if(!REV[2]){ $('c2zo').textContent= est.nivel==='interno'? z.toFixed(2):'—'; $('c2pv').textContent='—'; $('c2pvx').textContent='—'; $('c2ver').className='veredicto'; $('c2ver').textContent='Calcula, decide y entrega tu decisión a la junta para ver el veredicto.'; return; }
+    $('c2zo').textContent=z.toFixed(2); $('c2pv').textContent= pv<0.0001?'< 0.0001':pv.toFixed(4); const px=binomCola(y,n,P0); $('c2pvx').textContent= px<0.0001?'< 0.0001':px.toFixed(4);
+    const rech = z>ZC[a];
+    $('c2ver').className='veredicto '+(rech?'rech':'norech');
+    $('c2ver').innerHTML = rech
+      ? '<b>Rechazas H₀.</b> El valor p ('+(pv<0.0001?'< 0.0001':pv.toFixed(4))+') es menor que α = '+a+'. Hay evidencia de que la infección subió: se pide la brigada.'
+      : '<b>No rechazas H₀.</b> El valor p ('+pv.toFixed(4)+') no es menor que α = '+a+'. Ojo: eso no prueba que no haya subido, solo que esta muestra no alcanza para decirlo.';
+  }
+  function c2tomar(){
+    const {n,a,p}=c2v(); const v=[]; let y=0;
+    for(let i=0;i<n;i++){ const s=Math.random()<p; v.push(s); if(s)y++; }
+    const ph=y/n, z=(ph-P0)/Math.sqrt(P0*(1-P0)/n), pv=1-Phi(z);
+    c2ult={n,y,ph,z,pv,a,v,p}; MIS[2].reset(); c2res(); c2dibZ(); c2dibGente();
+  }
+  function c2rep(){
+    const {n,a,p}=c2v(), zc=ZC[a]; let k=0;
+    for(let j=0;j<200;j++){ let y=0; for(let i=0;i<n;i++) if(Math.random()<p) y++; if((y/n-P0)/Math.sqrt(P0*(1-P0)/n)>zc) k++; }
+    const pw=c2pot(p,n,a);
+    $('c2repTxt').innerHTML = (Math.abs(p-P0)<1e-9)
+      ? 'Rechazaste en <b>'+k+'</b> de 200 veredas. Como la prevalencia real es justo p₀, cada rechazo es un <b>error tipo I</b>. Lo esperado es α · 200 = <b>'+(+a*200).toFixed(0)+'</b>.'
+      : (p<P0 ? 'Rechazaste en <b>'+k+'</b> de 200 veredas. La prevalencia real es menor que p₀, así que casi nunca deberías rechazar.'
+              : 'Rechazaste en <b>'+k+'</b> de 200 veredas, es decir '+(k/2).toFixed(1)+' %. La potencia teórica es <b>'+(pw*100).toFixed(1)+' %</b>. Las otras '+(200-k)+' veredas son errores tipo II: la infección subió y la prueba no lo vio.');
+  }
+  ['c2n','c2p'].forEach(i=>$(i).addEventListener('input',c2act));
+  document.querySelectorAll('input[name=c2a]').forEach(el=>el.addEventListener('change',()=>{ if(c2ult){c2ult.a=c2v().a;} $('c2repTxt').textContent=''; MIS[2].reset(); c2act(); }));
+  $('c2tomar').addEventListener('click',c2tomar);
+  $('c2rep').addEventListener('click',c2rep);
+  $('volver2').addEventListener('click',()=>{ location.hash=''; mostrar(); });
+  $('abrir-caso2').addEventListener('click',()=>elegir('2'));
+  $('abrir-caso3').addEventListener('click',()=>elegir('3'));
+  $('abrir-caso4').addEventListener('click',()=>elegir('4'));
+
+  // --- lámina corazón ---
+  (function(){
+    const NS='http://www.w3.org/2000/svg', orb=$('orbita'), L=orb.getTotalLength(), g=$('parasitos');
+    let fase='sano', ps=[], t0=0;
+    const textos={
+      sano:'Un corazón sano bombea a su ritmo y la sangre no tiene parásitos.',
+      aguda:'Fase aguda: semanas después de la picadura del pito, los tripanosomas circulan por la sangre. Muchas veces no da síntomas, o parece una gripa.',
+      cronica:'Fase crónica: años o décadas después, en una parte de las personas infectadas el parásito daña el músculo del corazón. Se agranda y bombea con menos fuerza. Detectar la infección a tiempo permite tratarla antes.'
+    };
+    function setFase(f){
+      fase=f; ['sano','aguda','cronica'].forEach(x=>$('f-'+x).setAttribute('aria-pressed',x===f));
+      $('anat2Txt').textContent=textos[f];
+      $('cor-pared').setAttribute('fill', f==='cronica'?'#3a1c1f':'#2a1a1c');
+      $('cor-pared').setAttribute('stroke', f==='cronica'?css('--red'):css('--fg'));
+      $('cor-pared').setAttribute('stroke-width', f==='cronica'?1.2:1.8);
+      const quiere = f==='aguda'?26:(f==='cronica'?4:0);
+      while(ps.length>quiere){ ps.pop().el.remove(); }
+      while(ps.length<quiere){
+        const el=document.createElementNS(NS,'path');
+        el.setAttribute('d','M-9 0 C-5 -5 -1 5 3 0 C5 -2 7 -3 11 -1');
+        el.setAttribute('fill','none'); el.setAttribute('stroke-width','2.2'); el.setAttribute('stroke-linecap','round');
+        g.appendChild(el); ps.push({el,s:Math.random(),v:0.0007+Math.random()*0.0006,ph:Math.random()*6});
+      }
+    }
+    ['sano','aguda','cronica'].forEach(x=>$('f-'+x).addEventListener('click',()=>setFase(x)));
+    setFase('sano');
+    function frame(ts){
+      if(!$('vista-caso2').hidden){
+        const cron=fase==='cronica', per=cron?1050:800, base=cron?1.24:1, amp=cron?0.025:0.06;
+        const ph=(ts%per)/per, b= ph<.12?Math.sin(ph/.12*Math.PI):(ph<.3?0.4*Math.sin((ph-.12)/.18*Math.PI):0);
+        const sc = reduce?base:base*(1+amp*b);
+        $('corazon').setAttribute('transform','translate(320 180) scale('+sc.toFixed(4)+')');
+        const RED=css('--red');
+        ps.forEach(p=>{
+          if(!reduce) p.s=(p.s+p.v*(1+0.6*b))%1;
+          const a=orb.getPointAtLength(p.s*L), c=orb.getPointAtLength(((p.s+0.002)%1)*L);
+          const ang=Math.atan2(c.y-a.y,c.x-a.x)*180/Math.PI, wig=reduce?0:Math.sin(ts/120+p.ph)*18;
+          p.el.setAttribute('transform','translate('+a.x.toFixed(1)+' '+a.y.toFixed(1)+') rotate('+(ang+wig).toFixed(1)+')');
+          p.el.setAttribute('stroke',RED);
+        });
+      }
+      if(!reduce) requestAnimationFrame(frame);
+    }
+    requestAnimationFrame(frame);
+  })();
+
+
+  // ================= CASO 3 =================
+  function lgam(x){ const c=[76.18009172947146,-86.50532032941677,24.01409824083091,-1.231739572450155,0.1208650973866179e-2,-0.5395239384953e-5];
+    let y=x, t=x+5.5; t-=(x+0.5)*Math.log(t); let ser=1.000000000190015; for(let j=0;j<6;j++) ser+=c[j]/++y; return -t+Math.log(2.5066282746310005*ser/x); }
+  function betacf(a,b,x){ let qab=a+b,qap=a+1,qam=a-1,c=1,d=1-qab*x/qap; if(Math.abs(d)<1e-30)d=1e-30; d=1/d; let h=d;
+    for(let m=1;m<=200;m++){ const m2=2*m; let aa=m*(b-m)*x/((qam+m2)*(a+m2)); d=1+aa*d; if(Math.abs(d)<1e-30)d=1e-30; c=1+aa/c; if(Math.abs(c)<1e-30)c=1e-30; d=1/d; h*=d*c;
+      aa=-(a+m)*(qab+m)*x/((a+m2)*(qap+m2)); d=1+aa*d; if(Math.abs(d)<1e-30)d=1e-30; c=1+aa/c; if(Math.abs(c)<1e-30)c=1e-30; d=1/d; const del=d*c; h*=del; if(Math.abs(del-1)<3e-12) break; } return h; }
+  function ibeta(a,b,x){ if(x<=0) return 0; if(x>=1) return 1; const bt=Math.exp(lgam(a+b)-lgam(a)-lgam(b)+a*Math.log(x)+b*Math.log(1-x));
+    return x<(a+1)/(a+b+2) ? bt*betacf(a,b,x)/a : 1-bt*betacf(b,a,1-x)/b; }
+  function tcdf(t,v){ const x=v/(v+t*t), tail=0.5*ibeta(v/2,0.5,x); return t>0?1-tail:tail; }
+  function tpdf(t,v){ return Math.exp(lgam((v+1)/2)-lgam(v/2))/Math.sqrt(v*Math.PI)*Math.pow(1+t*t/v,-(v+1)/2); }
+  function tinv(p,v){ let lo=0,hi=50; for(let i=0;i<80;i++){ const m=(lo+hi)/2; tcdf(m,v)<p?lo=m:hi=m; } return (lo+hi)/2; }
+  const MU2=6; // mejoría media con el estándar (ilustrativa)
+  let c3ult=null;
+  const c3v=()=>({n:+$('c3n').value, a:document.querySelector('input[name=c3a]:checked').value, d:+$('c3d').value, s:+$('c3s').value});
+  function media(x){ return x.reduce((a,b)=>a+b,0)/x.length; }
+  function varm(x){ const m=media(x); return x.reduce((a,b)=>a+(b-m)**2,0)/(x.length-1); }
+  function ensayo(n,d,sg){ const g1=[],g2=[]; for(let i=0;i<n;i++){ g1.push(MU2+d+sg*randn()); g2.push(MU2+sg*randn()); }
+    const m1=media(g1),m2=media(g2),v1=varm(g1),v2=varm(g2), gl=2*n-2, sp=Math.sqrt(((n-1)*v1+(n-1)*v2)/gl), T=(m1-m2)/(sp*Math.sqrt(2/n));
+    return {g1,g2,m1,m2,s1:Math.sqrt(v1),s2:Math.sqrt(v2),sp,T,gl,pv:1-tcdf(T,gl)}; }
+  function c3dibGrupos(){
+    const c=$('c3grupos'); if(!c.offsetParent) return;
+    const {ctx,w,h}=fit(c); ctx.clearRect(0,0,w,h);
+    const xmin=-10,xmax=26,padL=12,padR=12,padB=28;
+    const X=x=>padL+(Math.max(xmin,Math.min(xmax,x))-xmin)/(xmax-xmin)*(w-padL-padR);
+    const RED=css('--red'),H0=css('--h0'),LINE=css('--line'),MUT=css('--muted'),FG=css('--fg');
+    ctx.font='12px "IBM Plex Mono", monospace'; ctx.textAlign='center'; ctx.strokeStyle=LINE; ctx.fillStyle=MUT;
+    for(let x=-10;x<=25;x+=5){ ctx.globalAlpha=.5; ctx.beginPath(); ctx.moveTo(X(x),8); ctx.lineTo(X(x),h-padB); ctx.stroke(); ctx.globalAlpha=1; ctx.fillText(x,X(x),h-padB+18); }
+    ctx.textAlign='right'; ctx.fillText('mejoría (pts)',w-padR,h-padB-6);
+    const filas=[{y:(h-padB)*0.3,col:RED,lab:'Nuevo',k:'g1',m:'m1'},{y:(h-padB)*0.72,col:H0,lab:'Estándar',k:'g2',m:'m2'}];
+    filas.forEach(f=>{
+      ctx.fillStyle=MUT; ctx.textAlign='left'; ctx.fillText(f.lab,padL,f.y-30);
+      if(!c3ult){ ctx.fillStyle=LINE; ctx.fillText('sin datos todavía',X(4),f.y+4); return; }
+      c3ult[f.k].forEach((v,i)=>{ const jit=((i*37)%17-8)*1.6; ctx.beginPath(); ctx.arc(X(v),f.y+jit,4.5,0,7); ctx.fillStyle=f.col; ctx.globalAlpha=.8; ctx.fill(); ctx.globalAlpha=1; });
+      const mx=X(c3ult[f.m]); ctx.strokeStyle=FG; ctx.lineWidth=2.5; ctx.beginPath(); ctx.moveTo(mx,f.y-22); ctx.lineTo(mx,f.y+22); ctx.stroke(); ctx.lineWidth=1;
+      ctx.fillStyle=FG; ctx.textAlign='center'; ctx.fillText('Ȳ = '+c3ult[f.m].toFixed(1),mx,f.y+38);
+    });
+  }
+  function c3dibT(){
+    const c=$('c3t'); if(!c.offsetParent) return;
+    const {ctx,w,h}=fit(c), {n,a}=c3v(), gl=2*n-2, tc=tinv(1-(+a),gl);
+    const xmin=-4.5,xmax=6,padL=12,padR=12,padT=16,padB=30,ymax=0.43;
+    const X=x=>padL+(x-xmin)/(xmax-xmin)*(w-padL-padR), Y=y=>h-padB-y/ymax*(h-padT-padB);
+    const RED=css('--red'),LINE=css('--line'),MUT=css('--muted'),FG=css('--fg');
+    ctx.clearRect(0,0,w,h); ctx.font='12px "IBM Plex Mono", monospace'; ctx.textAlign='center'; ctx.strokeStyle=LINE; ctx.fillStyle=MUT;
+    for(let x=-4;x<=6;x+=2){ ctx.globalAlpha=.5; ctx.beginPath(); ctx.moveTo(X(x),padT); ctx.lineTo(X(x),h-padB); ctx.stroke(); ctx.globalAlpha=1; ctx.fillText(x,X(x),h-padB+18); }
+    ctx.beginPath(); ctx.moveTo(X(tc),Y(0)); for(let x=tc;x<=xmax;x+=.02) ctx.lineTo(X(x),Y(tpdf(x,gl))); ctx.lineTo(X(xmax),Y(0)); ctx.closePath(); ctx.fillStyle=RED; ctx.globalAlpha=.4; ctx.fill(); ctx.globalAlpha=1;
+    ctx.setLineDash([3,4]); ctx.beginPath(); for(let x=xmin;x<=xmax;x+=.02){ const px=X(x),py=Y(pdf(x,0,1)); x===xmin?ctx.moveTo(px,py):ctx.lineTo(px,py);} ctx.strokeStyle=MUT; ctx.lineWidth=1.5; ctx.stroke(); ctx.setLineDash([]);
+    ctx.beginPath(); for(let x=xmin;x<=xmax;x+=.02){ const px=X(x),py=Y(tpdf(x,gl)); x===xmin?ctx.moveTo(px,py):ctx.lineTo(px,py);} ctx.strokeStyle=FG; ctx.lineWidth=2.5; ctx.stroke();
+    if(!(est.nivel==='jefe' && !REV[3])){ ctx.fillStyle=RED; ctx.textAlign='left'; ctx.fillText('t_α = '+tc.toFixed(3),X(tc)+4,Y(0.13)); }
+    ctx.fillStyle=MUT; ctx.fillText(gl+' gl',X(-4.3),padT+10);
+    if(c3ult && REV[3]){ const to=Math.max(xmin,Math.min(xmax,c3ult.T)); ctx.strokeStyle=FG; ctx.lineWidth=2; ctx.setLineDash([5,4]); ctx.beginPath(); ctx.moveTo(X(to),padT+16); ctx.lineTo(X(to),h-padB); ctx.stroke(); ctx.setLineDash([]);
+      ctx.fillStyle=FG; ctx.textAlign=X(to)>w-90?'right':'left'; ctx.fillText('T obs = '+c3ult.T.toFixed(2),X(to)+(ctx.textAlign==='left'?5:-5),padT+28); }
+    c._map={xmin,xmax,padL,padR,nom:'T',tail:x=>1-tcdf(x,gl)}; probeDraw(c,ctx,X,h,padT,padB,3);
+  }
+  function c3res(){
+    const ids=['t3n1','t3n2','t3m1','t3m2','t3s1','t3s2','c3sp','c3to','c3tc','c3pv'];
+    if(!c3ult){ ids.forEach(i=>$(i).textContent='—'); $('c3ver').className='veredicto'; $('c3ver').textContent='Corre el ensayo para ver los resultados.'; return; }
+    const u=c3ult, a=c3v().a, tc=tinv(1-(+a),u.gl);
+    $('t3n1').textContent=u.g1.length; $('t3n2').textContent=u.g2.length;
+    $('t3m1').textContent=u.m1.toFixed(2); $('t3m2').textContent=u.m2.toFixed(2);
+    $('t3s1').textContent=u.s1.toFixed(2); $('t3s2').textContent=u.s2.toFixed(2);
+    $('c3sp').textContent=u.sp.toFixed(2);
+    if(!REV[3]){ $('c3to').textContent= est.nivel==='interno'? u.T.toFixed(3):'—'; $('c3tc').textContent= est.nivel==='jefe'?'— ('+u.gl+')':tc.toFixed(3)+' ('+u.gl+')'; $('c3pv').textContent='—'; $('c3ver').className='veredicto'; $('c3ver').textContent='Calcula, decide y entrega tu decisión a la junta para ver el veredicto.'; return; }
+    $('c3to').textContent=u.T.toFixed(3);
+    $('c3tc').textContent=tc.toFixed(3)+' ('+u.gl+')'; const pvs=u.pv<0.0001?'< 0.0001':u.pv.toFixed(4); $('c3pv').textContent=pvs;
+    const rech=u.T>tc; $('c3ver').className='veredicto '+(rech?'rech':'norech');
+    $('c3ver').innerHTML = rech
+      ? '<b>Rechazas H₀.</b> El valor p ('+pvs+') es menor que α = '+a+'. Hay evidencia de que el tratamiento nuevo mejora más que el estándar.'
+      : '<b>No rechazas H₀.</b> El valor p ('+pvs+') no es menor que α = '+a+'. Esta muestra no alcanza para decir que el nuevo es mejor. Eso no es lo mismo que decir que son iguales.';
+  }
+  function c3act(){
+    const {n,d,s:sg}=c3v();
+    $('c3nOut').textContent=n; $('c3dOut').textContent=d.toFixed(1)+' pts'; $('c3sOut').textContent=sg.toFixed(1)+' pts';
+    $('vN').textContent=n+'+'+n; $('vA').textContent=(+c3v().a).toFixed(2);
+    if(c3ult && (c3ult.g1.length!==n || c3ult.d!==d || c3ult.s!==sg)){ c3ult=null; MIS[3]&&MIS[3].reset(); }
+    { const a=c3v().a; if(SIM[3] && (n!==simKey[3].n || d!==simKey[3].d || sg!==simKey[3].s || a!==simKey[3].a)) SIM[3].reset(); simKey[3]={n,d,s:sg,a}; }
+    c3res(); c3dibGrupos(); c3dibT();
+  }
+  function c3correr(){ const {n,d,s:sg}=c3v(); c3ult=ensayo(n,d,sg); c3ult.d=d; c3ult.s=sg; MIS[3].reset(); c3res(); c3dibGrupos(); c3dibT(); }
+  function c3rep(){
+    const {n,a,d,s:sg}=c3v(), tc=tinv(1-(+a),2*n-2); let k=0;
+    for(let j=0;j<500;j++) if(ensayo(n,d,sg).T>tc) k++;
+    $('vB').textContent=(1-k/500).toFixed(3);
+    $('c3repTxt').innerHTML = d===0
+      ? 'Rechazaste en <b>'+k+'</b> de 500 ensayos. Como los dos tratamientos son iguales, cada rechazo es un <b>error tipo I</b>. Lo esperado es α · 500 = <b>'+(+a*500).toFixed(0)+'</b>.'
+      : 'El ensayo detectó la ventaja en <b>'+k+'</b> de 500 repeticiones: una potencia de <b>'+(k/5).toFixed(1)+' %</b>. Las otras '+(500-k)+' veces fueron errores tipo II: el tratamiento sí era mejor y el ensayo no lo vio.';
+  }
+  ['c3n','c3d','c3s'].forEach(i=>$(i).addEventListener('input',()=>{ $('c3repTxt').textContent=''; c3act(); }));
+  document.querySelectorAll('input[name=c3a]').forEach(el=>el.addEventListener('change',()=>{ $('c3repTxt').textContent=''; MIS[3].reset(); c3act(); }));
+  $('c3correr').addEventListener('click',c3correr);
+  $('c3rep').addEventListener('click',c3rep);
+  $('volver3').addEventListener('click',()=>{ location.hash=''; mostrar(); });
+
+  // --- lámina lupus ---
+  (function(){
+    const NS='http://www.w3.org/2000/svg', g=$('anticuerpos');
+    const blancos=[[320,56,'piel'],[302,146,'pulmon'],[338,146,'pulmon'],[322,158,'corazon'],[296,218,'rinon'],[344,218,'rinon'],[246,292,'articulacion'],[394,292,'articulacion'],[254,124,'articulacion'],[386,124,'articulacion']];
+    let estado='calma', abs=[];
+    const txt={calma:'En calma, las defensas hacen su trabajo normal y los órganos están tranquilos. Valentina vive su vida, trabaja y dibuja.',
+      brote:'En un brote, el cuerpo fabrica autoanticuerpos (las Y rojas) que atacan tejidos propios. Se inflaman las articulaciones, la piel de las mejillas y, a veces, los riñones, el corazón o los pulmones.'};
+    function setE(e){
+      estado=e; $('l-calma').setAttribute('aria-pressed',e==='calma'); $('l-brote').setAttribute('aria-pressed',e==='brote'); $('anat3Txt').textContent=txt[e];
+      document.querySelectorAll('#anat3 .cuerpo-org').forEach(el=>{ el.setAttribute('fill', e==='brote'?'rgba(229,72,77,.35)':'transparent'); el.setAttribute('stroke', e==='brote'?css('--red'):css('--fg')); });
+      while(abs.length) abs.pop().el.remove();
+      const N = e==='brote'?22:5;
+      for(let i=0;i<N;i++){ const el=document.createElementNS(NS,'path'); el.setAttribute('d','M0 6 L0 -1 M0 -1 L-5 -7 M0 -1 L5 -7'); el.setAttribute('fill','none'); el.setAttribute('stroke-width','2'); el.setAttribute('stroke-linecap','round'); g.appendChild(el);
+        const b=blancos[i%blancos.length]; abs.push({el,b,x:Math.random()*640,y:Math.random()*380,ph:Math.random()*6}); }
+    }
+    $('l-calma').addEventListener('click',()=>setE('calma')); $('l-brote').addEventListener('click',()=>setE('brote'));
+    setE('calma');
+    function frame(ts){
+      if(!$('vista-caso3').hidden){
+        const RED=css('--red'), MUT=css('--muted');
+        abs.forEach((a,i)=>{
+          if(estado==='brote'){ const tx=a.b[0]+Math.cos(ts/700+a.ph)*16, ty=a.b[1]+Math.sin(ts/700+a.ph)*12; if(!reduce){ a.x+=(tx-a.x)*0.03; a.y+=(ty-a.y)*0.03; } else { a.x=tx; a.y=ty; } }
+          else if(!reduce){ a.x+=Math.cos(ts/1500+a.ph)*0.4; a.y+=Math.sin(ts/1800+a.ph)*0.3; a.x=(a.x+640)%640; a.y=(a.y+380)%380; }
+          const ang = estado==='brote' ? Math.atan2(a.b[1]-a.y,a.b[0]-a.x)*180/Math.PI+90 : (ts/30+i*40)%360;
+          a.el.setAttribute('transform','translate('+a.x.toFixed(1)+' '+a.y.toFixed(1)+') rotate('+ang.toFixed(0)+')');
+          a.el.setAttribute('stroke', estado==='brote'?RED:MUT); a.el.setAttribute('opacity', estado==='brote'?1:.5);
+        });
+      }
+      if(!reduce) requestAnimationFrame(frame);
+    }
+    requestAnimationFrame(frame);
+  })();
+
+
+  // ================= CASO 4 =================
+  function gammaP(a,x){ if(x<=0) return 0; const gln=lgam(a);
+    if(x<a+1){ let ap=a,sum=1/a,del=sum; for(let n=0;n<300;n++){ ap++; del*=x/ap; sum+=del; if(Math.abs(del)<Math.abs(sum)*1e-12) break; } return sum*Math.exp(-x+a*Math.log(x)-gln); }
+    let b=x+1-a,c=1e30,d=1/b,h=d; for(let i=1;i<300;i++){ const an=-i*(i-a); b+=2; d=an*d+b; if(Math.abs(d)<1e-30)d=1e-30; c=b+an/c; if(Math.abs(c)<1e-30)c=1e-30; d=1/d; const del=d*c; h*=del; if(Math.abs(del-1)<1e-12) break; }
+    return 1-Math.exp(-x+a*Math.log(x)-gln)*h; }
+  const chi2cdf=(x,k)=>gammaP(k/2,x/2);
+  const chi2pdf=(x,k)=> x<=0?0:Math.exp((k/2-1)*Math.log(x)-x/2-(k/2)*Math.LN2-lgam(k/2));
+  function chi2inv(p,k){ let lo=0,hi=k+60*Math.sqrt(2*k)+50; for(let i=0;i<90;i++){ const m=(lo+hi)/2; chi2cdf(m,k)<p?lo=m:hi=m; } return (lo+hi)/2; }
+  const fcdf=(x,a,b)=> x<=0?0:ibeta(a/2,b/2,a*x/(a*x+b));
+  const fpdf=(x,a,b)=> x<=0?0:Math.exp(0.5*(a*Math.log(a*x)+b*Math.log(b)-(a+b)*Math.log(a*x+b))-Math.log(x)-(lgam(a/2)+lgam(b/2)-lgam((a+b)/2)));
+  function finv(p,a,b){ let lo=0,hi=200; for(let i=0;i<90;i++){ const m=(lo+hi)/2; fcdf(m,a,b)<p?lo=m:hi=m; } return (lo+hi)/2; }
+  const S0SQ=64; let c4ult=null;
+  const c4v=()=>({n:+$('c4n').value, a:document.querySelector('input[name=c4a]:checked').value, s1:+$('c4s1').value, s2:+$('c4s2').value, forma:document.querySelector('input[name=c4forma]:checked').value});
+  function errT3(){ const z=randn(), q=(randn()**2+randn()**2+randn()**2)/3; return z/Math.sqrt(q)/Math.sqrt(3); }
+  function banco(n,s1,s2,forma){ const e=forma==='pesadas'?errT3:randn; const d=[],m=[]; for(let i=0;i<n;i++){ d.push(120+s1*e()); m.push(120+s2*e()); }
+    const v1=varm(d), v2=varm(m), gl=n-1, chi=gl*v1/S0SQ, F=v1/v2;
+    return {d,m,v1,v2,gl,chi,F,pchi:1-chi2cdf(chi,gl),pf:1-fcdf(F,gl,gl)}; }
+  function curvaDist(cid,f,crit,obs,xmax,etq,ocultarCrit,tail){
+    const c=$(cid); if(!c.offsetParent) return;
+    const {ctx,w,h}=fit(c), padL=12,padR=12,padT=16,padB=30;
+    let ymax=0; for(let x=xmax/400;x<=xmax;x+=xmax/400) ymax=Math.max(ymax,f(x)); ymax*=1.15; ymax=Math.min(ymax, 3);
+    const X=x=>padL+x/xmax*(w-padL-padR), Y=y=>h-padB-Math.min(y,ymax)/ymax*(h-padT-padB);
+    const RED=css('--red'),LINE=css('--line'),MUT=css('--muted'),FG=css('--fg');
+    ctx.clearRect(0,0,w,h); ctx.font='12px "IBM Plex Mono", monospace'; ctx.textAlign='center'; ctx.strokeStyle=LINE; ctx.fillStyle=MUT;
+    const step = xmax>40?20:(xmax>12?5:1);
+    for(let x=0;x<=xmax+1e-9;x+=step){ ctx.globalAlpha=.5; ctx.beginPath(); ctx.moveTo(X(x),padT); ctx.lineTo(X(x),h-padB); ctx.stroke(); ctx.globalAlpha=1; ctx.fillText(x,X(x),h-padB+18); }
+    const dx=xmax/500;
+    if(crit<xmax){ ctx.beginPath(); ctx.moveTo(X(crit),Y(0)); for(let x=crit;x<=xmax;x+=dx) ctx.lineTo(X(x),Y(f(x))); ctx.lineTo(X(xmax),Y(0)); ctx.closePath(); ctx.fillStyle=RED; ctx.globalAlpha=.4; ctx.fill(); ctx.globalAlpha=1; }
+    ctx.beginPath(); for(let x=dx;x<=xmax;x+=dx){ const px=X(x),py=Y(f(x)); x===dx?ctx.moveTo(px,py):ctx.lineTo(px,py);} ctx.strokeStyle=FG; ctx.lineWidth=2.5; ctx.stroke();
+    if(!ocultarCrit){ ctx.fillStyle=RED; ctx.textAlign=X(crit)>w-110?'right':'left'; ctx.fillText(etq+'_α = '+crit.toFixed(2),X(crit)+(ctx.textAlign==='left'?4:-4),padT+30); }
+    if(obs!=null){ const o=Math.min(obs,xmax); ctx.strokeStyle=FG; ctx.lineWidth=2; ctx.setLineDash([5,4]); ctx.beginPath(); ctx.moveTo(X(o),padT+38); ctx.lineTo(X(o),h-padB); ctx.stroke(); ctx.setLineDash([]);
+      ctx.fillStyle=FG; ctx.textAlign=X(o)>w-110?'right':'left'; ctx.fillText(etq+' obs = '+obs.toFixed(2)+(obs>xmax?' →':''),X(o)+(ctx.textAlign==='left'?5:-5),padT+12); }
+    if(tail){ c._map={xmin:0,xmax,padL,padR,nom:etq,tail}; probeDraw(c,ctx,X,h,padT,padB,4); }
+  }
+  function c4dibDist(){
+    const {n,a}=c4v(), gl=n-1, ca=1-(+a);
+    const xc=chi2inv(ca,gl), xmaxC=Math.ceil(Math.max(xc*1.6, gl+4*Math.sqrt(2*gl))/5)*5;
+    const oc=est.nivel==='jefe'&&!REV[4], ver=c4ult&&REV[4];
+    curvaDist('c4chi',x=>chi2pdf(x,gl),xc,ver?c4ult.chi:null,xmaxC,'χ²',oc,x=>1-chi2cdf(x,gl));
+    curvaDist('c4f',x=>fpdf(x,gl,gl),finv(ca,gl,gl),ver?c4ult.F:null,6,'F',oc,x=>1-fcdf(x,gl,gl));
+  }
+  function c4dibTira(){
+    const c=$('c4tira'); if(!c.offsetParent) return;
+    const {ctx,w,h}=fit(c); ctx.clearRect(0,0,w,h);
+    const xmin=80,xmax=160,padL=70,padR=12,padB=28, X=x=>padL+(Math.max(xmin,Math.min(xmax,x))-xmin)/(xmax-xmin)*(w-padL-padR);
+    const RED=css('--red'),H0=css('--h0'),LINE=css('--line'),MUT=css('--muted'),FG=css('--fg');
+    ctx.font='12px "IBM Plex Mono", monospace'; ctx.textAlign='center'; ctx.strokeStyle=LINE; ctx.fillStyle=MUT;
+    for(let x=80;x<=160;x+=10){ ctx.globalAlpha=.5; ctx.beginPath(); ctx.moveTo(X(x),8); ctx.lineTo(X(x),h-padB); ctx.stroke(); ctx.globalAlpha=1; ctx.fillText(x,X(x),h-padB+18); }
+    ctx.strokeStyle=FG; ctx.setLineDash([4,4]); ctx.beginPath(); ctx.moveTo(X(120),8); ctx.lineTo(X(120),h-padB); ctx.stroke(); ctx.setLineDash([]);
+    // banda de la norma ±2σ0
+    ctx.fillStyle=H0; ctx.globalAlpha=.07; ctx.fillRect(X(104),8,X(136)-X(104),h-padB-8); ctx.globalAlpha=1;
+    ctx.fillStyle=MUT; ctx.textAlign='left'; ctx.fillText('120 ± 2σ₀',X(104)+4,20);
+    const filas=[{y:(h-padB)*0.36,lab:'Digital',col:RED,k:'d'},{y:(h-padB)*0.76,lab:'Manual',col:H0,k:'m'}];
+    filas.forEach(f=>{ ctx.fillStyle=f.col; ctx.textAlign='left'; ctx.fillText(f.lab,4,f.y+4);
+      if(!c4ult){ ctx.fillStyle=LINE; ctx.fillText('sin lecturas',X(122),f.y+4); return; }
+      c4ult[f.k].forEach((v,i)=>{ const j=((i*37)%15-7)*1.5; ctx.beginPath(); ctx.arc(X(v),f.y+j,4.5,0,7); ctx.fillStyle=f.col; ctx.globalAlpha=.8; ctx.fill(); ctx.globalAlpha=1; }); });
+  }
+  function c4res(){
+    const ids=['c4S1','c4chio','c4chic','c4chip','c4S2','c4fo','c4fc','c4fp'];
+    if(!c4ult){ ids.forEach(i=>$(i).textContent='—'); ['c4ver1','c4ver2'].forEach(i=>{ $(i).className='veredicto'; $(i).textContent='Toma las lecturas para ver el resultado.'; }); return; }
+    const u=c4ult, a=c4v().a, ca=1-(+a), xc=chi2inv(ca,u.gl), fc=finv(ca,u.gl,u.gl), fmt=p=>p<0.0001?'< 0.0001':p.toFixed(4);
+    $('c4S1').textContent=Math.sqrt(u.v1).toFixed(2)+' mmHg'; $('c4S2').textContent=Math.sqrt(u.v2).toFixed(2)+' mmHg';
+    if(!REV[4]){ const it=est.nivel==='interno', j=est.nivel==='jefe';
+      $('c4chio').textContent= it?u.chi.toFixed(2):'—'; $('c4fo').textContent= it?u.F.toFixed(2):'—';
+      $('c4chic').textContent= j?'— ('+u.gl+')':xc.toFixed(2)+' ('+u.gl+')'; $('c4fc').textContent= j?'— ('+u.gl+', '+u.gl+')':fc.toFixed(2)+' ('+u.gl+', '+u.gl+')';
+      $('c4chip').textContent='—'; $('c4fp').textContent='—';
+      ['c4ver1','c4ver2'].forEach(i=>{ $(i).className='veredicto'; $(i).textContent='Calcula, decide y entrega tu decisión a la junta para ver el veredicto.'; }); return; }
+    $('c4chio').textContent=u.chi.toFixed(2); $('c4chic').textContent=xc.toFixed(2)+' ('+u.gl+')'; $('c4chip').textContent=fmt(u.pchi);
+    $('c4fo').textContent=u.F.toFixed(2); $('c4fc').textContent=fc.toFixed(2)+' ('+u.gl+', '+u.gl+')'; $('c4fp').textContent=fmt(u.pf);
+    const r1=u.chi>xc, r2=u.F>fc;
+    $('c4ver1').className='veredicto '+(r1?'rech':'norech'); $('c4ver2').className='veredicto '+(r2?'rech':'norech');
+    $('c4ver1').innerHTML = r1 ? '<b>Rechazas H₀.</b> Hay evidencia de que el digital es más disperso de lo que permite la norma. Don Aurelio no debería ajustar su dosis con ese aparato.'
+                               : '<b>No rechazas H₀.</b> Con estas lecturas no hay evidencia de que incumpla la norma.';
+    $('c4ver2').innerHTML = r2 ? '<b>Rechazas H₀.</b> Hay evidencia de que el digital es más disperso que el manual.'
+                               : '<b>No rechazas H₀.</b> No hay evidencia suficiente de que el digital sea más disperso que el manual.';
+  }
+  function c4act(){
+    const {n,a,s1,s2}=c4v();
+    $('c4nOut').textContent=n; $('c4s1Out').textContent=s1+' mmHg'; $('c4s2Out').textContent=s2+' mmHg';
+    $('vN').textContent=n; $('vA').textContent=(+a).toFixed(2);
+    if(c4ult && (c4ult.d.length!==n || c4ult.s1!==s1 || c4ult.s2!==s2 || c4ult.forma!==c4v().forma)){ c4ult=null; MIS[4]&&MIS[4].reset(); }
+    { const key=[n,a,s1,s2,c4v().forma].join('|'); if(SIM[4] && key!==simKey[4]) SIM[4].reset(); simKey[4]=key; }
+    c4res(); c4dibDist(); c4dibTira();
+  }
+  function c4medir(){ const {n,s1,s2,forma}=c4v(); c4ult=banco(n,s1,s2,forma); c4ult.s1=s1; c4ult.s2=s2; c4ult.forma=forma; MIS[4].reset(); c4res(); c4dibDist(); c4dibTira(); }
+  function c4rep(){
+    const {n,a,s1,s2}=c4v(), ca=1-(+a), xc=chi2inv(ca,n-1), fc=finv(ca,n-1,n-1); let k1=0,k2=0;
+    for(let j=0;j<500;j++){ const b=banco(n,s1,s2); if(b.chi>xc)k1++; if(b.F>fc)k2++; }
+    const t1 = s1<=8 ? (s1===8 ? 'Como el digital cumple justo la norma (σ = 8), cada rechazo de la χ² es un <b>error tipo I</b>; lo esperado es α · 500 = <b>'+(+a*500).toFixed(0)+'</b>.' : 'El digital cumple la norma, así que esos rechazos son errores tipo I.')
+                       : 'Esa es la potencia simulada de la χ²: '+(k1/5).toFixed(1)+' %.';
+    $('c4repTxt').innerHTML='χ²: rechazaste en <b>'+k1+'</b> de 500 bancos. '+t1+' F: rechazaste en <b>'+k2+'</b> de 500'+(s1===s2?' (como las σ son iguales, también son errores tipo I).':'.');
+  }
+  ['c4n','c4s1','c4s2'].forEach(i=>$(i).addEventListener('input',()=>{ $('c4repTxt').textContent=''; c4act(); }));
+  document.querySelectorAll('input[name=c4forma]').forEach(el=>el.addEventListener('change',()=>{ c4act(); }));
+  document.querySelectorAll('input[name=c4a]').forEach(el=>el.addEventListener('change',()=>{ $('c4repTxt').textContent=''; MIS[4].reset(); c4act(); }));
+  $('c4medir').addEventListener('click',c4medir); $('c4rep').addEventListener('click',c4rep);
+  $('volver4').addEventListener('click',()=>{ location.hash=''; mostrar(); });
+
+  // --- lámina tensiómetro ---
+  (function(){
+    const NS='http://www.w3.org/2000/svg', tk=$('dialTicks'), mk=$('dialMarcas');
+    const ang=v=>(-120+(v-80)/80*240); // 80..160 mmHg -> -120..120 grados
+    for(let v=80;v<=160;v+=10){ const a=ang(v)*Math.PI/180, x1=Math.sin(a)*70, y1=-Math.cos(a)*70, x2=Math.sin(a)*78, y2=-Math.cos(a)*78;
+      const l=document.createElementNS(NS,'line'); l.setAttribute('x1',x1);l.setAttribute('y1',y1);l.setAttribute('x2',x2);l.setAttribute('y2',y2); l.setAttribute('stroke',v===120?'var(--h0)':'var(--muted)'); l.setAttribute('stroke-width',v===120?3:1.5); tk.appendChild(l);
+      if(v%20===0){ const t=document.createElementNS(NS,'text'); t.setAttribute('x',Math.sin(a)*56); t.setAttribute('y',-Math.cos(a)*56+4); t.setAttribute('text-anchor','middle'); t.setAttribute('class','lbl'); t.textContent=v; tk.appendChild(t); } }
+    let aparato='manual', lect=[], ultimo=0, actual=120;
+    const txt={manual:'El tensiómetro manual de toda la vida: las lecturas caen apretadas alrededor de 120. Poca varianza.',
+               digital:'El digital barato: en promedio también marca cerca de 120, pero cada lectura salta mucho. Mucha varianza. Mira cómo se riegan las marcas en el reloj.'};
+    function setA(x){ aparato=x; lect=[]; mk.innerHTML=''; $('d-manual').setAttribute('aria-pressed',x==='manual'); $('d-digital').setAttribute('aria-pressed',x==='digital'); $('anat4Txt').textContent=txt[x]; $('dialS').textContent='S = —'; }
+    $('d-manual').addEventListener('click',()=>setA('manual')); $('d-digital').addEventListener('click',()=>setA('digital'));
+    setA('manual');
+    function leer(){
+      const sg = aparato==='manual'?3:12; const v=120+sg*randn(); actual=v; lect.push(v); if(lect.length>14) lect.shift();
+      mk.innerHTML=''; const col = aparato==='manual'?'var(--h0)':'var(--red)';
+      lect.forEach((x,i)=>{ const a=ang(Math.max(80,Math.min(160,x)))*Math.PI/180; const c=document.createElementNS(NS,'circle'); c.setAttribute('cx',Math.sin(a)*84); c.setAttribute('cy',-Math.cos(a)*84); c.setAttribute('r',3.5); c.setAttribute('fill',col); c.setAttribute('opacity',(0.3+0.7*(i+1)/lect.length).toFixed(2)); mk.appendChild(c); });
+      $('dialNum').textContent=Math.round(v);
+      if(lect.length>1){ $('dialS').textContent='S = '+Math.sqrt(varm(lect)).toFixed(1)+' mmHg ('+lect.length+' lecturas)'; }
+    }
+    let shown=120;
+    function frame(ts){
+      if(!$('vista-caso4').hidden){
+        if(ts-ultimo>(reduce?2500:1100)){ ultimo=ts; leer(); }
+        shown += reduce ? (actual-shown) : (actual-shown)*0.12;
+        $('aguja').setAttribute('transform','rotate('+ang(Math.max(80,Math.min(160,shown))).toFixed(2)+')');
+        if(!reduce) $('arteria').setAttribute('stroke-dashoffset', (-(ts/25)%24).toFixed(1));
+      }
+      requestAnimationFrame(frame);
+    }
+    requestAnimationFrame(frame);
+  })();
+
+
+  // ================= MISIONES Y JUNTA =================
+  const REV={1:false,2:false,3:false,4:false};
+  const simKey={2:{},3:{},4:''};
+  let c1ant=null;
+  let PROG={}; try{ PROG=JSON.parse(localStorage.getItem('jm-prog')||'{}'); }catch(e){}
+  function guardarProg(){ try{ localStorage.setItem('jm-prog',JSON.stringify(PROG)); }catch(e){} }
+  const num=v=>{ v=String(v).trim().replace(',','.'); return v===''?NaN:Number(v); };
+  const cerca=(a,b,tol)=>Math.abs(a-b)<=Math.max(tol,Math.abs(b)*0.02);
+  const f4=x=>(Math.abs(x)<0.0001&&x!==0)?x.toExponential(2):(+x.toFixed(4)).toString();
+  const MIS={};
+  const HABLA={est:['E','La estadística','cuestiona tus supuestos y cálculos'],med:['M','La médica','pregunta qué significa para la persona'],epi:['P','La epidemióloga','piensa en errores, potencia y población']};
+  function crearMision(c,conf){
+    const box=$('mis'+c), m={estado:'espera',dec:{},resp:[],pts:{}};
+    MIS[c]=m;
+    function hay(){ return conf.hayDatos(); }
+    m.reset=function(){ m.estado=hay()?'decidir':'espera'; m.dec={}; m.resp=[]; m.pts={}; REV[c]=false; conf.revelar(); m.render(); };
+    m.render=function(){
+      const nivel=est.nivel;
+      const dot=document.querySelector('#f'+c+'-3 .listo'); if(dot) dot.hidden = m.estado!=='decidir';
+      if(m.estado==='espera'){ box.innerHTML='<p class="m-ctx">'+conf.espera+'</p>'; return; }
+      const tests=conf.tests();
+      if(m.estado==='decidir'){
+        let h='<div class="m-ctx">'+conf.contexto()+'</div>';
+        tests.forEach((t,i)=>{
+          h+='<div class="m-test"><h4>'+t.titulo+'</h4><div class="m-campos">';
+          if(nivel==='interno') h+='<div class="m-campo"><label>Estadístico (te lo da la junta)</label><div style="font-family:var(--mono);font-size:20px">'+t.nombre+' = '+t.val.toFixed(t.dec||3)+'</div></div>';
+          else h+='<div class="m-campo"><label for="mis'+c+'e'+i+'">Calcula '+t.nombre+'</label><input id="mis'+c+'e'+i+'" inputmode="decimal" autocomplete="off" placeholder="ej. 1.23">'+(nivel==='residente'?'<span class="m-hint">'+t.hint+'</span>':'')+'</div>';
+          if(nivel==='jefe' && t.critNombre) h+='<div class="m-campo"><label for="mis'+c+'k'+i+'">Valor crítico '+t.critNombre+(t.gl?' ('+t.gl+')':'')+'</label><input id="mis'+c+'k'+i+'" inputmode="decimal" autocomplete="off" placeholder="de la tabla"></div>';
+          else if(t.critNombre) h+='<div class="m-campo"><label>Valor crítico</label><div style="font-family:var(--mono);font-size:20px">'+t.critNombre+' = '+t.crit.toFixed(3)+'</div></div>';
+          h+='</div><div class="m-dec" role="group" aria-label="Decisión">';
+          t.decis.forEach((d,j)=>{ h+='<button type="button" data-t="'+i+'" data-j="'+j+'" aria-pressed="'+(m.dec[i]===j)+'">'+d+'</button>'; });
+          h+='</div></div>';
+        });
+        h+='<p class="m-err" id="mis'+c+'err" role="status"></p><button class="btn" type="button" id="mis'+c+'ok">Entregar a la junta</button>';
+        box.innerHTML=h;
+        box.querySelectorAll('.m-dec button').forEach(b=>b.addEventListener('click',()=>{ m.dec[b.dataset.t]=+b.dataset.j; box.querySelectorAll('.m-dec button[data-t="'+b.dataset.t+'"]').forEach(x=>x.setAttribute('aria-pressed',x===b)); }));
+        $('mis'+c+'ok').addEventListener('click',()=>m.entregar(tests));
+        return;
+      }
+      // junta o fin
+      let h='<div class="m-fb">'+m.fb+'</div>'+(conf.ic?'<div class="m-ic">'+conf.ic()+'</div>':'')+'<div class="m-verdad">'+conf.verdad()+'</div>';
+      const qs=m.preguntas;
+      qs.forEach((q,i)=>{
+        const r=m.resp[i], hb=HABLA[q.quien];
+        h+='<div class="pregunta"><div class="quien-habla"><span class="av '+q.quien+'">'+hb[0]+'</span><div><b>'+hb[1]+'</b><br><span>'+hb[2]+'</span></div></div><p>'+q.t+'</p><div class="opciones">';
+        q.o.forEach((o,j)=>{ let cls=''; if(r!=null){ if(j===q.c) cls='bien'; else if(j===r) cls='mal'; } h+='<button type="button" class="'+cls+'" data-q="'+i+'" data-j="'+j+'" '+(r!=null?'disabled':'')+'>'+o+'</button>'; });
+        h+='</div>'+(r!=null?'<p class="expl">'+(r===q.c?'<b style="color:var(--good)">Bien.</b> ':'<b style="color:var(--bad)">No exactamente.</b> ')+q.e+'</p>':'')+'</div>';
+      });
+      if(m.estado==='fin'){
+        const tot=Math.round(m.pts.calc+m.pts.dec+m.pts.junta), ap=tot>=70;
+        h+='<div class="m-total"><div class="nota-final">'+tot+' <small>/ 100</small></div>'+(est.modo==='practica'?'<span class="sello" style="color:var(--muted)">PRÁCTICA · no entra al expediente</span>':'<span class="sello '+(ap?'aprob':'repr')+'">'+(ap?'CASO APROBADO':'POR REFORZAR')+'</span>')+
+           '<span class="m-hint">Cálculo '+Math.round(m.pts.calc)+' · Decisión '+Math.round(m.pts.dec)+' · Junta '+Math.round(m.pts.junta)+(PROG[c]&&PROG[c].intentos?' · Mejor nota en evaluación: '+PROG[c].mejor:'')+'</span>'+
+           '<button class="btn sec" type="button" id="mis'+c+'otra">Repetir con datos nuevos</button></div>';
+      }
+      box.innerHTML=h;
+      box.querySelectorAll('.opciones button:not(:disabled)').forEach(b=>b.addEventListener('click',()=>m.responder(+b.dataset.q,+b.dataset.j)));
+      if(m.estado==='fin') $('mis'+c+'otra').addEventListener('click',()=>{ conf.nuevo(); m.reset(); if(c>1){ irFase(c,2); return; } $('caja'+c).scrollIntoView({behavior:reduce?'auto':'smooth',block:'start'}); });
+    };
+    m.entregar=function(tests){
+      const nivel=est.nivel, err=$('mis'+c+'err'); const vals=[], crits=[];
+      for(let i=0;i<tests.length;i++){
+        if(nivel!=='interno'){ const v=num($('mis'+c+'e'+i).value); if(isNaN(v)){ err.textContent='Escribe tu valor de '+tests[i].nombre+' (usa punto o coma para decimales).'; $('mis'+c+'e'+i).focus(); return; } vals[i]=v; }
+        if(nivel==='jefe' && tests[i].critNombre){ const k=num($('mis'+c+'k'+i).value); if(isNaN(k)){ err.textContent='Escribe el valor crítico '+tests[i].critNombre+'.'; $('mis'+c+'k'+i).focus(); return; } crits[i]=k; }
+        if(m.dec[i]==null){ err.textContent='Falta tu decisión en: '+tests[i].titulo+'.'; return; }
+      }
+      const nT=tests.length; let calc=0, dec=0, fb='';
+      tests.forEach((t,i)=>{
+        if(nivel==='interno'){ calc+=20/nT; }
+        else {
+          const peso = (nivel==='jefe'&&t.critNombre)?10/nT:20/nT;
+          const okE=cerca(vals[i],t.val,t.tol); if(okE) calc+=peso;
+          fb+='<div class="'+(okE?'ok':'no')+'">'+t.nombre+': escribiste '+vals[i]+', el valor es '+t.val.toFixed(t.dec||3)+(okE?'':'. Revisa: '+t.hint)+'<span class="pts">'+(okE?'+':'')+Math.round(okE?peso:0)+'</span></div>';
+          if(nivel==='jefe'&&t.critNombre){ const okK=cerca(crits[i],t.crit,t.critTol); if(okK) calc+=peso; fb+='<div class="'+(okK?'ok':'no')+'">'+t.critNombre+': escribiste '+crits[i]+', el valor es '+t.crit.toFixed(3)+'<span class="pts">'+(okK?'+':'')+Math.round(okK?peso:0)+'</span></div>'; }
+        }
+        const correcta = t.rech?0:1, okD=m.dec[i]===correcta; if(okD) dec+=35/nT;
+        fb+='<div class="'+(okD?'ok':'no')+'">'+t.titulo+': elegiste "'+t.decis[m.dec[i]]+'". '+(okD?'Coherente con los datos.':'Con estos datos lo correcto era "'+t.decis[correcta]+'", porque '+t.razon+'.')+'<span class="pts">'+(okD?'+':'')+Math.round(okD?35/nT:0)+'</span></div>';
+      });
+      m.pts={calc,dec,junta:0}; m.fb=fb;
+      m.preguntas=conf.preguntas(tests.map(t=>t.rech));
+      m.estado='junta'; REV[c]=true; conf.revelar(); m.render();
+      $('caja'+c).scrollIntoView({behavior:reduce?'auto':'smooth',block:'start'});
+    };
+    m.responder=function(i,j){
+      m.resp[i]=j; if(j===m.preguntas[i].c) m.pts.junta+=15;
+      if(m.preguntas.every((q,k)=>m.resp[k]!=null)){
+        m.estado='fin'; const tot=Math.round(m.pts.calc+m.pts.dec+m.pts.junta);
+        if(est.modo!=='practica'){ const pr=PROG[c]||{mejor:0,intentos:0}; pr.intentos++; pr.mejor=Math.max(pr.mejor,tot); pr.ultimo=tot; pr.aprobado=pr.mejor>=70; PROG[c]=pr; guardarProg(); pintarPortada(); }
+      }
+      m.render();
+    };
+    m.reset();
+  }
+  const tipoError=(h0cierta,rech)=> h0cierta ? (rech?'<b style="color:var(--bad)">un error tipo I</b> (rechazaste una H₀ que era cierta)':'un acierto: no rechazaste una H₀ que era cierta')
+                                              : (rech?'un acierto: detectaste un efecto que sí existía':'<b style="color:var(--bad)">un error tipo II</b> (el efecto existía y la prueba no lo vio)');
+  const NOTA_ERR=' Ojo: esto no afecta tu nota. Con α y β mayores que cero, una decisión bien tomada a veces cae en un error; por eso se controlan sus probabilidades.';
+
+  // --- navegación ---
+  function nombre(){ let v=''; try{v=localStorage.getItem('jm-nombre')||''}catch(e){} return v; }
+  let ultimoCaso=0;
+  function mostrar(){
+    const h=location.hash, c1=h==='#caso-1', c2=h==='#caso-2', c3=h==='#caso-3', c4=h==='#caso-4';
+    $('vista-inicio').hidden=c1||c2||c3||c4; $('vista-caso1').hidden=!c1; $('vista-caso2').hidden=!c2; $('vista-caso3').hidden=!c3; $('vista-caso4').hidden=!c4;
+    const nm=nombre(), dra = nm ? 'Dra. '+nm.split(' ')[0] : '';
+    $('quien').textContent = dra || 'residente'; $('quien2').textContent = dra || 'Residente'; $('quien3').textContent = dra || 'Residente'; $('quien4').textContent = dra || 'Residente';
+    document.querySelectorAll('details.teoria').forEach(d=>d.open = est.nivel!=='jefe');
+    pintarPortada();
+    if(c1||c2||c3||c4) window.scrollTo(0,0);
+    const actual = c1?1:c2?2:c3?3:c4?4:0;
+    if(actual && actual!==ultimoCaso){ ultimoCaso=actual; if(actual>1 && est.nivel==='jefe'){ asignarVerdad(actual); } Object.values(MIS).forEach(mm=>mm.render()); }
+    if(!actual) ultimoCaso=0;
+    if(actual && typeof irFase==='function' && FASES) irFase(actual, faseAct[actual]);
+    if(c4) requestAnimationFrame(c4act);
+    if(c3) requestAnimationFrame(c3act);
+    if(c1) requestAnimationFrame(actualizar);
+    if(c2) requestAnimationFrame(c2act);
+  }
+  // --- portada ---
+  const INS={fonendo:['Fonendo','<path d="M14 6v12c0 8 8 12 10 12s10-4 10-12V6"/><path d="M24 30v6c0 6 6 8 10 4"/><circle cx="36" cy="36" r="4"/>'],micro:['Microscopio','<path d="M14 42h22"/><path d="M20 42c-8-6-6-18 6-20"/><path d="M24 8l6-2 6 16-6 2z"/><path d="M29 24l2 6"/>'],corazon:['Corazón','<path d="M24 14c-3-6-14-6-15 3-1 9 7 16 15 23 8-7 16-14 15-23-1-9-12-9-15-3z"/><path d="M8 28h8l3-6 4 12 3-8h14"/>'],adn:['Doble hélice','<path d="M16 6c16 10 0 26 16 36"/><path d="M32 6c-16 10 0 26-16 36"/><path d="M18 12h12M17 24h14M18 36h12"/>'],gota:['Gota','<path d="M24 6S10 22 10 31c0 8 6 13 14 13s14-5 14-13C38 22 24 6 24 6z"/><path d="M17 32c0 4 3 6 6 6"/>'],cerebro:['Cerebro','<path d="M24 10c-4-4-12-2-12 4-6 2-6 10-2 12-2 6 4 10 8 8 2 4 6 4 6 0V10z"/><path d="M24 10c4-4 12-2 12 4 6 2 6 10 2 12 2 6-4 10-8 8-2 4-6 4-6 0"/>']};
+  const CASOS={'1':'Caso 1 · Tamizaje neonatal','2':'Caso 2 · Chagas en la vereda','3':'Caso 3 · Ensayo para lupus','4':'Caso 4 · El tensiómetro'};
+  const est={nivel:'residente',insignia:'fonendo',caso:'1',modo:'evaluacion'};
+  try{ Object.assign(est, JSON.parse(localStorage.getItem('jm-est')||'{}')); }catch(e){}
+  function guardar(){ try{ localStorage.setItem('jm-est',JSON.stringify(est)); localStorage.setItem('jm-nombre',$('nombre').value.trim()); }catch(e){} }
+  function pintarPortada(){
+    document.querySelectorAll('.niveles button[data-n]').forEach(b=>b.setAttribute('aria-pressed',b.dataset.n===est.nivel));
+    document.querySelectorAll('.modos button').forEach(b=>b.setAttribute('aria-pressed',b.dataset.m===est.modo));
+    document.querySelectorAll('.insig').forEach(b=>b.setAttribute('aria-pressed',b.dataset.i===est.insignia));
+    $('selCaso').textContent=CASOS[est.caso]; $('selIns').textContent=INS[est.insignia][0];
+    document.documentElement.dataset.nivel=est.nivel;
+    $('guardiaIns').innerHTML=INS[est.insignia][1];
+    const nm=$('nombre').value.trim();
+    $('guardiaTxt').textContent = nm ? ('DRA. '+nm.split(' ')[0].toUpperCase()+' · EN GUARDIA') : 'GUARDIA · EN VIVO';
+    const NOMS={'1':'Tamizaje neonatal','2':'Chagas en la vereda','3':'Ensayo para lupus','4':'El tensiómetro'};
+    let ap=0, tot=0, sig=null;
+    ['1','2','3','4'].forEach(c=>{ const pr=PROG[c]; const st = pr&&pr.aprobado?'hecho':(pr&&pr.intentos>0?'curso':'');
+      if(pr&&pr.aprobado) ap++; tot+=pr?pr.mejor:0; if(!sig && !(pr&&pr.aprobado)) sig=c;
+      document.querySelectorAll('[data-ec="'+c+'"]').forEach(el=>{ el.className='estado-caso '+st; el.textContent= st==='hecho'?'Aprobado · '+pr.mejor:(st==='curso'?'En curso · '+pr.mejor:'Pendiente'); });
+      document.querySelectorAll('[data-em="'+c+'"]').forEach(el=>{ el.textContent= st==='hecho'?'✓ APROBADO':(st==='curso'?'EN CURSO':'PENDIENTE'); el.setAttribute('fill', st==='hecho'?'var(--good)':(st==='curso'?'#d9b26f':'var(--muted)')); }); });
+    $('xCasos').textContent=ap+' de 4'; $('xPts').textContent=tot+' / 400';
+    $('xRango').textContent= ap===0?'Interno de primer día':(ap<=2?'Residente':(ap===3?'Residente mayor':'Jefe de guardia'));
+    $('xSig').textContent= sig? NOMS[sig] : 'Guardia completa';
+  }
+  $('nombre').value=nombre();
+  $('nombre').addEventListener('input',()=>{ guardar(); pintarPortada(); $('aviso').textContent=''; });
+  document.querySelectorAll('.modos button').forEach(b=>b.addEventListener('click',()=>{ est.modo=b.dataset.m; guardar(); pintarPortada(); Object.values(MIS).forEach(mm=>mm.reset()); }));
+  document.querySelectorAll('.niveles button[data-n]').forEach(b=>b.addEventListener('click',()=>{ est.nivel=b.dataset.n; guardar(); pintarPortada(); Object.values(MIS).forEach(mm=>mm.reset()); }));
+  document.querySelectorAll('.insig').forEach(b=>b.addEventListener('click',()=>{ est.insignia=b.dataset.i; guardar(); pintarPortada(); cerrarModal(); }));
+  let modalAbierto=null, foco=null;
+  function abrirModal(id){ foco=document.activeElement; modalAbierto=$(id); modalAbierto.hidden=false; modalAbierto.querySelector('[data-cerrar]').focus(); }
+  function cerrarModal(){ if(!modalAbierto) return; modalAbierto.hidden=true; modalAbierto=null; if(foco) foco.focus(); }
+  document.querySelectorAll('[data-cerrar]').forEach(b=>b.addEventListener('click',cerrarModal));
+  document.querySelectorAll('.modal-fondo').forEach(m=>m.addEventListener('click',e=>{ if(e.target===m) cerrarModal(); }));
+  addEventListener('keydown',e=>{
+    if(e.key==='Escape') cerrarModal();
+    if(e.key==='Tab' && modalAbierto){
+      const f=[...modalAbierto.querySelectorAll('button:not([disabled]),[tabindex="0"],input,a[href]')].filter(x=>x.offsetParent!==null);
+      if(!f.length) return; const first=f[0], last=f[f.length-1];
+      if(e.shiftKey && document.activeElement===first){ e.preventDefault(); last.focus(); }
+      else if(!e.shiftKey && document.activeElement===last){ e.preventDefault(); first.focus(); }
+      else if(!modalAbierto.contains(document.activeElement)){ e.preventDefault(); first.focus(); }
+    }
+  });
+  $('bCaso').addEventListener('click',()=>abrirModal('mCaso'));
+  $('bIns').addEventListener('click',()=>abrirModal('mIns'));
+  $('bMapa').addEventListener('click',()=>abrirModal('mMapa'));
+  $('bComo').addEventListener('click',()=>abrirModal('mComo'));
+  function elegir(c){ est.caso=c; guardar(); pintarPortada(); cerrarModal(); }
+  $('abrir-caso1').addEventListener('click',()=>elegir('1'));
+  document.querySelectorAll('.piso.abierto').forEach(g=>{
+    g.addEventListener('click',()=>elegir(g.dataset.caso));
+    g.addEventListener('keydown',e=>{ if(e.key==='Enter'||e.key===' '){ e.preventDefault(); elegir(g.dataset.caso); } });
+  });
+  $('bIniciar').addEventListener('click',()=>{
+    if(!$('nombre').value.trim()){ $('aviso').textContent='Escribe tu nombre para firmar la guardia.'; $('nombre').focus(); return; }
+    guardar(); location.hash='caso-'+est.caso;
+  });
+  $('volver').addEventListener('click',()=>{ location.hash=''; mostrar(); });
+  function c1invalidar(){ limpiar(); c1ant=null; MIS[1].reset(); }
+  $('k').addEventListener('input',()=>{ c1invalidar(); actualizar(); });
+  $('n').addEventListener('input',()=>{ c1invalidar(); actualizar(); });
+  $('c1antonia').addEventListener('click',()=>{ const k=+$('k').value, n=+$('n').value, se=SIG/Math.sqrt(n), tiene=Math.random()<0.5; c1ant={k,n,tiene,xbar:(tiene?MUA:MU0)+se*randn()}; MIS[1].reset(); });
+  $('simular').addEventListener('click',simular);
+  $('limpiar').addEventListener('click',limpiar);
+  addEventListener('hashchange',mostrar);
+  addEventListener('resize',()=>{ dibujar(); c2dibZ(); c2dibPot(); c2dibGente(); c3dibGrupos(); c3dibT(); c4dibDist(); c4dibTira(); if(reduce) ecgFrame(); });
+
+
+  // ---- configuración de cada misión ----
+  crearMision(1,{
+    espera:'Ajusta tu corte k y el número de mediciones n arriba. Cuando estés lista, pide el resultado de Antonia con el botón.',
+    hayDatos:()=>!!c1ant,
+    contexto:()=>'Llegó el resultado de Antonia: <b>X̄ = '+c1ant.xbar.toFixed(2)+' mg/dL</b> (promedio de '+c1ant.n+' medición'+(c1ant.n>1?'es':'')+'). Tu corte es <b>k = '+c1ant.k.toFixed(2)+'</b>. Antes de decidir, la junta quiere saber cuánto vale α con tu regla.',
+    tests:()=>{ const {a}=errores(c1ant.k,c1ant.n); return [{titulo:'¿Llamas a la familia?',nombre:'α',val:a,tol:0.01,dec:3,hint:'α = 1 − Φ((k − μ₀)/(σ/√n)), con μ₀ = 1.5 y σ = 0.6',critNombre:null,decis:['Llamo a la familia','La mando a casa'],rech:c1ant.xbar>c1ant.k,razon: c1ant.xbar>c1ant.k?'X̄ quedó por encima de k':'X̄ quedó por debajo de k'}]; },
+    revelar:()=>{},
+    verdad:()=>{ const rech=c1ant.xbar>c1ant.k; return 'La verdad: Antonia '+(c1ant.tiene?'<b>sí tiene PKU</b>':'<b>está sana</b>')+'. Tu regla produjo '+tipoError(!c1ant.tiene,rech)+'.'+NOTA_ERR; },
+    nuevo:()=>{ c1ant=null; },
+    preguntas:(r)=>[
+      {quien:'est',t:'Si mueves el corte k hacia la derecha, ¿qué pasa con α y β?',o:['α baja y β sube','Los dos bajan','α sube y β baja'],c:0,e:'Correr k a la derecha deja menos área de la campana sana por encima (α baja), pero deja más área de la campana con PKU por debajo (β sube). Para bajar los dos a la vez hay que subir n.'},
+      r[0]?{quien:'med',t:'Antonia quedó por encima del corte. ¿Qué le dices a la familia?',o:['Que tiene PKU, con seguridad','Que hay que confirmar con un segundo examen, porque puede ser un falso positivo','Que el examen salió mal'],c:1,e:'Superar el corte es evidencia, no un diagnóstico. Existe α, la probabilidad de falso positivo, así que siempre se confirma.'}
+          :{quien:'med',t:'Antonia quedó por debajo del corte. ¿Se puede decir que no tiene PKU?',o:['Sí, el examen la descarta','No con certeza: existe β, la probabilidad de un falso negativo','Solo si se midió una vez'],c:1,e:'No rechazar H₀ no prueba que H₀ sea cierta. Por eso se quiere β pequeño en un tamizaje.'},
+      {quien:'epi',t:'En tamizaje neonatal, ¿qué error preocupa más y qué implica para el corte?',o:['El falso negativo; por eso se prefiere un corte más bajo, aunque suba α','El falso positivo; por eso se prefiere un corte alto','Son igual de graves; el corte va justo en el medio'],c:0,e:'Un bebé con PKU sin detectar sufre daño irreversible; un falso positivo cuesta un segundo examen y un susto. Se acepta más α para tener β muy pequeño.'}
+    ]
+  });
+  crearMision(2,{
+    espera:'Configura el estudio y toma la muestra en la vereda. Con los datos en mano, la junta te espera aquí.',
+    hayDatos:()=>!!c2ult,
+    contexto:()=>{ const u=c2ult; return 'Datos de la vereda: <b>Y = '+u.y+'</b> positivos de <b>n = '+u.n+'</b>, o sea <b>p̂ = '+u.ph.toFixed(4)+'</b>. Hipótesis: H₀: p = 0.08 contra Hₐ: p &gt; 0.08, con <b>α = '+c2v().a+'</b>.'; },
+    tests:()=>{ const u=c2ult, a=c2v().a; return [{titulo:'¿Rechazas H₀?',nombre:'Z',val:u.z,tol:0.05,dec:3,hint:'Z = (p̂ − p₀) / √(p₀(1 − p₀)/n)',critNombre:'z<sub>α</sub>',crit:ZC[a],critTol:0.01,decis:['Rechazo H₀ (pedir brigada)','No rechazo H₀'],rech:u.z>ZC[a],razon: u.z>ZC[a]?'Z quedó por encima de z<sub>α</sub>':'Z no superó z<sub>α</sub>'}]; },
+    revelar:()=>{ c2res(); c2dibZ(); },
+    ic:()=>conf2ic(),
+    verdad:()=>{ const p=c2ult.p, rech=c2ult.z>ZC[c2v().a]; return 'La verdad oculta: la prevalencia real era <b>'+Math.round(p*100)+' %</b>, así que H₀ '+(p<=P0?'era cierta':'era falsa')+'. La prueba produjo '+tipoError(p<=P0,rech)+'.'+NOTA_ERR; },
+    nuevo:()=>{ c2ult=null; asignarVerdad(2); c2act(); },
+    preguntas:(r)=>[
+      {quien:'est',t:'¿Por qué el denominador de Z usa p₀ y no p̂?',o:['Porque el estadístico se calcula suponiendo que H₀ es cierta','Porque p̂ siempre es más pequeño que p₀','Da igual, es por costumbre'],c:0,e:'Toda la prueba se construye bajo H₀: si p fuera 0.08, ¿qué tan raro sería este p̂? Por eso el error estándar va con p₀.'},
+      r[0]?{quien:'med',t:'Rechazaste H₀. ¿Qué significa el valor p que obtuviste?',o:['La probabilidad de que H₀ sea cierta','La probabilidad de ver un resultado así o más extremo, si H₀ fuera cierta','La probabilidad de que la infección haya subido'],c:1,e:'El valor p se calcula suponiendo H₀. No es la probabilidad de que H₀ sea cierta; es qué tan sorprendentes serían los datos si lo fuera.'}
+          :{quien:'med',t:'No rechazaste H₀. ¿Puede Luz Marina concluir que la infección sigue en 8 %?',o:['Sí, quedó demostrado','No: no hay evidencia suficiente de un aumento, pero eso no prueba que siga en 8 %','Sí, siempre que n sea mayor que 30'],c:1,e:'No rechazar no es aceptar. Puede que la infección sí subió y la muestra no tuvo potencia para verlo.'},
+      {quien:'epi',t:'La Secretaría quiere detectar un aumento a 12 % con más seguridad. ¿Qué cambias en el diseño?',o:['Aumentar n, para subir la potencia','Bajar α a 0.01','Cambiar a una prueba de dos colas'],c:0,e:'Más personas examinadas reducen el error estándar y suben la potencia. Bajar α o pasar a dos colas la bajarían.'}
+    ]
+  });
+  crearMision(3,{
+    espera:'Diseña el ensayo y córrelo. Con los resultados en la tabla, la junta te espera aquí.',
+    hayDatos:()=>!!c3ult,
+    contexto:()=>{ const u=c3ult; return 'Resultados: <b>Ȳ₁ = '+u.m1.toFixed(3)+'</b>, <b>Ȳ₂ = '+u.m2.toFixed(3)+'</b>, <b>S₁ = '+u.s1.toFixed(3)+'</b>, <b>S₂ = '+u.s2.toFixed(3)+'</b>, con n₁ = n₂ = '+u.g1.length+'. Ya tienes <b>S<sub>p</sub> = '+u.sp.toFixed(3)+'</b>. H₀: μ₁ − μ₂ = 0 contra Hₐ: μ₁ − μ₂ &gt; 0, <b>α = '+c3v().a+'</b>.'; },
+    tests:()=>{ const u=c3ult, a=c3v().a, tc=tinv(1-(+a),u.gl); return [{titulo:'¿Rechazas H₀?',nombre:'T',val:u.T,tol:0.05,dec:3,hint:'T = (Ȳ₁ − Ȳ₂) / (S_p √(1/n₁ + 1/n₂))',critNombre:'t<sub>α</sub>',gl:u.gl+' gl',crit:tc,critTol:0.01,decis:['Rechazo H₀: el nuevo es mejor','No rechazo H₀'],rech:u.T>tc,razon: u.T>tc?'T quedó por encima de t<sub>α</sub>':'T no superó t<sub>α</sub>'}]; },
+    revelar:()=>{ c3res(); c3dibT(); },
+    ic:()=>conf3ic(),
+    verdad:()=>{ const d=c3ult.d, rech=c3ult.T>tinv(1-(+c3v().a),c3ult.gl); return 'La verdad oculta: la ventaja real del tratamiento nuevo era <b>'+d.toFixed(1)+' puntos</b>, así que H₀ '+(d===0?'era cierta':'era falsa')+'. El ensayo produjo '+tipoError(d===0,rech)+'.'+NOTA_ERR; },
+    nuevo:()=>{ c3ult=null; asignarVerdad(3); c3act(); },
+    preguntas:(r)=>[
+      {quien:'est',t:'¿Qué supuestos usa esta prueba t con varianza combinada?',o:['Que los dos grupos sean normales y tengan la misma varianza','Que cada grupo tenga más de 30 personas','Que las dos medias muestrales sean parecidas'],c:0,e:'La S_p junta las dos varianzas porque supone que estiman la misma σ². Si las varianzas son muy distintas, hay otras versiones de la prueba.'},
+      r[0]?{quien:'med',t:'La diferencia salió estadísticamente significativa. ¿Ya hay que cambiarle el tratamiento a todas las personas con lupus?',o:['Sí: significativo quiere decir importante','Todavía no: hay que ver si la diferencia es clínicamente relevante y pesar efectos secundarios y costos','No, porque α pudo ser 0.10'],c:1,e:'Significancia estadística no es lo mismo que importancia clínica. Con mucha gente, una mejoría de medio punto puede salir significativa y no cambiarle la vida a nadie.'}
+          :{quien:'med',t:'No rechazaste H₀. ¿Le puedes decir a Valentina que el tratamiento nuevo no funciona?',o:['Sí','No: no hay evidencia suficiente de que sea superior, pero eso no demuestra que sean equivalentes','Sí, si el valor p es mayor que 0.5'],c:1,e:'Ausencia de evidencia no es evidencia de ausencia. Un ensayo pequeño puede no detectar un efecto real.'},
+      {quien:'epi',t:'Con 10 personas por grupo, la potencia de este ensayo ronda el 50 %. ¿Qué riesgo tiene?',o:['Alto riesgo de error tipo II: descartar un tratamiento que sí sirve','Alto riesgo de error tipo I','Ninguno: la t ya corrige el tamaño pequeño'],c:0,e:'La t controla α, no β. Con poca potencia, la mitad de las veces un tratamiento útil pasaría como "no significativo".'}
+    ]
+  });
+  crearMision(4,{
+    espera:'Toma las lecturas en el simulador de 120 mmHg. Con los datos en mano, la junta te espera aquí.',
+    hayDatos:()=>!!c4ult,
+    contexto:()=>{ const u=c4ult; return 'Con n = '+u.d.length+' lecturas por aparato: <b>S₁² = '+u.v1.toFixed(3)+'</b> (digital) y <b>S₂² = '+u.v2.toFixed(3)+'</b> (manual). La norma dice σ₀² = 64. Nivel <b>α = '+c4v().a+'</b>.'; },
+    tests:()=>{ const u=c4ult, a=c4v().a, ca=1-(+a), xc=chi2inv(ca,u.gl), fc=finv(ca,u.gl,u.gl); return [
+      {titulo:'Prueba χ²: ¿el digital incumple la norma?',nombre:'χ²',val:u.chi,tol:0.3,dec:3,hint:'χ² = (n − 1)S₁² / 64',critNombre:'χ²<sub>α</sub>',gl:u.gl+' gl',crit:xc,critTol:0.05,decis:['Rechazo H₀: incumple','No rechazo H₀'],rech:u.chi>xc,razon: u.chi>xc?'χ² superó el valor crítico':'χ² no superó el valor crítico'},
+      {titulo:'Prueba F: ¿el digital es más disperso que el manual?',nombre:'F',val:u.F,tol:0.05,dec:3,hint:'F = S₁² / S₂²',critNombre:'F<sub>α</sub>',gl:u.gl+', '+u.gl+' gl',crit:fc,critTol:0.03,decis:['Rechazo H₀: más disperso','No rechazo H₀'],rech:u.F>fc,razon: u.F>fc?'F superó el valor crítico':'F no superó el valor crítico'}]; },
+    revelar:()=>{ c4res(); c4dibDist(); },
+    ic:()=>conf4ic(),
+    verdad:()=>{ const u=c4ult, a=c4v().a, ca=1-(+a); const r1=u.chi>chi2inv(ca,u.gl), r2=u.F>finv(ca,u.gl,u.gl);
+      return 'La verdad oculta: el digital tenía <b>σ = '+u.s1+' mmHg</b> y el manual <b>σ = '+u.s2+' mmHg</b>. En la χ², H₀ '+(u.s1<=8?'era cierta':'era falsa')+': '+tipoError(u.s1<=8,r1)+'. En la F, H₀ '+(u.s1<=u.s2?'era cierta':'era falsa')+': '+tipoError(u.s1<=u.s2,r2)+'.'+(u.forma==='pesadas'?' <b>Además, los errores tenían colas pesadas:</b> el supuesto de normalidad no se cumplía, así que los valores p de estas pruebas no son confiables.':'')+NOTA_ERR; },
+    nuevo:()=>{ c4ult=null; asignarVerdad(4); c4act(); },
+    preguntas:(r)=>[
+      {quien:'est',t:'¿Qué supuesto es crítico para las pruebas χ² y F de varianzas?',o:['Que las lecturas sean normales: estas pruebas son muy sensibles a ese supuesto','Que n sea mayor que 30','Que la media de las lecturas sea 120'],c:0,e:'A diferencia de las pruebas de medias, las de varianza no se arreglan con el teorema del límite central. Si los datos tienen colas pesadas, α real puede ser mucho mayor que el nominal.'},
+      r[0]?{quien:'med',t:'El digital incumple la norma. ¿Qué le recomiendas al puesto de salud?',o:['Usarlo, pero tomar una sola lectura','No usarlo para ajustar la dosis de Don Aurelio; usar el manual o un aparato validado','Restarle 10 mmHg a cada lectura'],c:1,e:'El problema es la dispersión, no un sesgo fijo: restar un número no lo arregla. Para decisiones de dosis se necesita un aparato preciso.'}
+          :{quien:'med',t:'No rechazaste en la χ². ¿El aparato quedó certificado como preciso?',o:['Sí','No: solo que estos datos no muestran que incumpla; con más lecturas podrías detectarlo','Sí, si el valor p es mayor que α'],c:1,e:'No rechazar no certifica nada. Una validación real exige suficientes lecturas para tener buena potencia.'},
+      {quien:'epi',t:'¿Por qué F debería andar cerca de 1 si H₀ es cierta?',o:['Porque es el cociente de dos estimaciones de la misma varianza','Porque las medias de los aparatos son iguales','Porque los dos grupos tienen el mismo n'],c:0,e:'Si σ₁² = σ₂², tanto S₁² como S₂² estiman lo mismo, y su cociente oscila alrededor de 1.'}
+    ]
+  });
+
+
+  // ================= RONDA 2 =================
+  function probeDraw(c,ctx,X,h,padT,padB,cn){
+    if(c._probe==null || !c._map) return;
+    if(est.nivel==='jefe' && !REV[cn]){ c._probe=null; return; }
+    const x=c._probe, p=c._map.tail(x); ctx.save();
+    ctx.strokeStyle=css('--muted'); ctx.lineWidth=1; ctx.setLineDash([2,3]); ctx.beginPath(); ctx.moveTo(X(x),padT); ctx.lineTo(X(x),h-padB); ctx.stroke(); ctx.setLineDash([]);
+    const txt='P('+c._map.nom+' ≥ '+x.toFixed(2)+' | H₀) = '+(p<0.0001?'< 0.0001':p.toFixed(4));
+    ctx.font='12px "IBM Plex Mono", monospace'; const w=ctx.measureText(txt).width+12; let bx=X(x)+8; if(bx+w>c.clientWidth-4) bx=X(x)-8-w; if(bx<2) bx=2;
+    const by=h-padB-30; ctx.fillStyle=css('--bg'); ctx.globalAlpha=.92; ctx.fillRect(bx,by,w,22); ctx.globalAlpha=1; ctx.strokeStyle=css('--line'); ctx.strokeRect(bx,by,w,22);
+    ctx.fillStyle=css('--fg'); ctx.textAlign='left'; ctx.fillText(txt,bx+6,by+15); ctx.restore();
+  }
+  function probeSetup(id,redraw,cn){
+    const c=$(id); c.style.touchAction='pan-y';
+    const set=e=>{ if(!c._map) return; if(est.nivel==='jefe' && !REV[cn]){ c._probe=null; return; }
+      const rc=c.getBoundingClientRect(), m=c._map; const x=m.xmin+(e.clientX-rc.left-m.padL)/(rc.width-m.padL-m.padR)*(m.xmax-m.xmin);
+      c._probe=Math.max(m.xmin+1e-6,Math.min(m.xmax,x)); redraw(); };
+    c.addEventListener('pointerdown',set);
+    c.addEventListener('pointermove',e=>{ if(e.pointerType==='mouse'||e.buttons) set(e); });
+    c.addEventListener('pointerleave',e=>{ if(e.pointerType==='mouse'){ c._probe=null; redraw(); } });
+  }
+  probeSetup('c2z',()=>c2dibZ(),2); probeSetup('c3t',()=>c3dibT(),3);
+  probeSetup('c4chi',()=>c4dibDist(),4); probeSetup('c4f',()=>c4dibDist(),4);
+  (function(){ // arrastrar el corte en el caso 1
+    const c=$('curvas'); c.style.touchAction='pan-y'; c.style.cursor='ew-resize';
+    const set=e=>{ const rc=c.getBoundingClientRect(); const x=(e.clientX-rc.left-36)/(rc.width-48)*5.5; const k=Math.max(1,Math.min(4,Math.round(x*100)/100)); if(k!==+$('k').value){ $('k').value=k; $('k').dispatchEvent(new Event('input')); } };
+    c.addEventListener('pointerdown',e=>{ set(e); try{c.setPointerCapture(e.pointerId)}catch(_){} });
+    c.addEventListener('pointermove',e=>{ if(e.buttons) set(e); });
+  })();
+
+  // ---- intervalo de confianza, dibujado ----
+  function icSVG(filas,refs,lo,hi){
+    const W=600, H=36+filas.length*34, pl=14, pr=14, X=v=>pl+(Math.max(lo,Math.min(hi,v))-lo)/(hi-lo)*(W-pl-pr);
+    let g='<svg viewBox="0 0 '+W+' '+H+'" role="img" aria-label="Intervalo de confianza">';
+    refs.forEach(rf=>{ g+='<line x1="'+X(rf.v)+'" y1="6" x2="'+X(rf.v)+'" y2="'+(H-18)+'" stroke="'+rf.col+'" stroke-dasharray="4 4" stroke-width="1.5"/><text x="'+X(rf.v)+'" y="'+(H-4)+'" text-anchor="middle" font-family="IBM Plex Mono, monospace" font-size="12" fill="'+rf.col+'">'+rf.lab+'</text>'; });
+    filas.forEach((f,i)=>{ const y=20+i*34, a=X(f.lo), b=f.hi===Infinity?W-pr:X(f.hi);
+      g+='<line x1="'+a+'" y1="'+y+'" x2="'+b+'" y2="'+y+'" stroke="var(--fg)" stroke-width="'+(f.grueso?5:2.5)+'" stroke-linecap="round"/>';
+      g+='<circle cx="'+a+'" cy="'+y+'" r="4" fill="var(--fg)"/>'+(f.hi===Infinity?'<path d="M'+(b-8)+' '+(y-6)+' L'+b+' '+y+' L'+(b-8)+' '+(y+6)+'" fill="none" stroke="var(--fg)" stroke-width="2"/>':'<circle cx="'+b+'" cy="'+y+'" r="4" fill="var(--fg)"/>');
+      g+='<text x="'+a+'" y="'+(y-9)+'" font-family="IBM Plex Mono, monospace" font-size="11" fill="var(--muted)">'+f.lab+'</text>'; });
+    return g+'</svg>';
+  }
+  const conf2ic=()=>{ const u=c2ult, a=c2v().a, se=Math.sqrt(u.ph*(1-u.ph)/u.n), L=u.ph-ZC[a]*se, lo95=Math.max(0,u.ph-1.96*se), hi95=u.ph+1.96*se;
+    return '<b>Intervalo de confianza</b><span>Límite inferior al '+Math.round((1-a)*100)+' %: la prevalencia real es por lo menos <b>'+(L*100).toFixed(1)+' %</b>. Intervalo bilateral al 95 %: de '+(lo95*100).toFixed(1)+' % a '+(hi95*100).toFixed(1)+' %.</span>'+
+      icSVG([{lo:Math.max(0,L),hi:Infinity,lab:'límite inferior '+Math.round((1-a)*100)+' %'},{lo:lo95,hi:hi95,lab:'IC 95 %',grueso:true}],[{v:P0,lab:'p₀ = 8 %',col:'var(--h0)'}],0,Math.max(0.25,hi95+0.03))+
+      '<span class="icmsg">Si el límite inferior queda por encima de 8 %, la conclusión coincide con la prueba. Casi siempre coinciden, pero no es exacto: el intervalo usa p̂ en el error estándar y la prueba usa p₀.</span>'; };
+  const conf3ic=()=>{ const u=c3ult, a=c3v().a, n=u.g1.length, se=u.sp*Math.sqrt(2/n), d=u.m1-u.m2, tc=tinv(1-(+a),u.gl), L=d-tc*se, t25=tinv(0.975,u.gl), lo=d-t25*se, hi=d+t25*se, MID=4;
+    let msg, cls;
+    if(L>=MID){ msg='Todo el intervalo está por encima de la MID: la ventaja es significativa <b>y</b> clínicamente importante.'; cls='bien'; }
+    else if(L>0){ msg='La ventaja es estadísticamente significativa (L &gt; 0), pero el intervalo incluye valores menores que la MID de 4 puntos. <b>Significativo no garantiza importante.</b>'; cls='alerta'; }
+    else { msg='El intervalo incluye el 0: no hay evidencia de ventaja. Pero también incluye valores grandes'+(hi>MID?', incluso mayores que la MID':'')+': los datos no alcanzan para descartar un efecto útil.'; cls=''; }
+    return '<b>Intervalo de confianza para μ₁ − μ₂</b><span>Límite inferior al '+Math.round((1-a)*100)+' %: <b>L = '+L.toFixed(2)+' pts</b>. Intervalo bilateral al 95 %: de '+lo.toFixed(2)+' a '+hi.toFixed(2)+' pts.</span>'+
+      icSVG([{lo:L,hi:Infinity,lab:'límite inferior '+Math.round((1-a)*100)+' %'},{lo,hi,lab:'IC 95 %',grueso:true}],[{v:0,lab:'0 (H₀)',col:'var(--muted)'},{v:MID,lab:'MID = 4',col:'#d9b26f'}],Math.min(-4,lo-1),Math.max(10,hi+1))+
+      '<span class="icmsg '+cls+'">'+msg+'</span>'; };
+  const conf4ic=()=>{ const u=c4ult, a=c4v().a, gl=u.gl, L=Math.sqrt(gl*u.v1/chi2inv(1-(+a),gl)), lo=Math.sqrt(gl*u.v1/chi2inv(0.975,gl)), hi=Math.sqrt(gl*u.v1/chi2inv(0.025,gl));
+    return '<b>Intervalo de confianza para σ del digital</b><span>Límite inferior al '+Math.round((1-a)*100)+' %: <b>σ ≥ '+L.toFixed(2)+' mmHg</b>. Intervalo bilateral al 95 %: de '+lo.toFixed(2)+' a '+hi.toFixed(2)+' mmHg. Rechazar en la χ² equivale a que este límite inferior supere 8.</span>'+
+      icSVG([{lo:L,hi:Infinity,lab:'límite inferior '+Math.round((1-a)*100)+' %'},{lo,hi,lab:'IC 95 %',grueso:true}],[{v:8,lab:'σ₀ = 8',col:'var(--h0)'}],0,Math.max(20,hi+2))+
+      (u.forma==='pesadas'?'<span class="icmsg alerta">Este intervalo también supone normalidad. Con colas pesadas su confianza real es menor que la que dice.</span>':''); };
+
+  // ---- simulador de convergencia ----
+  const SIM={};
+  function crearSim(c,o){
+    const host=$('sim'+c), st={k:[],n:0,run:false,vel:10,acc:0,hist:[],ctx:null};
+    host.innerHTML='<div class="sim-bar"><button class="btn sec" type="button" data-a="play">Pausar</button><div class="vel" role="group" aria-label="Velocidad"><button type="button" data-v="1">×1</button><button type="button" data-v="10" aria-pressed="true">×10</button><button type="button" data-v="100">×100</button></div><button class="btn sec" type="button" data-a="reset">Reiniciar</button><span class="sim-n"></span></div><canvas role="img" aria-label="Proporción acumulada de rechazos según el número de repeticiones"></canvas><div class="leyenda"></div>';
+    const cv=host.querySelector('canvas'), bPlay=host.querySelector('[data-a=play]');
+    host.querySelectorAll('.vel button').forEach(b=>b.addEventListener('click',()=>{ st.vel=+b.dataset.v; host.querySelectorAll('.vel button').forEach(x=>x.setAttribute('aria-pressed',x===b)); }));
+    bPlay.addEventListener('click',()=>{ if(st.n>=o.N){ empezar(); return; } st.run=!st.run; if(st.run) loop(); else fin(); pintarBtn(); });
+    host.querySelector('[data-a=reset]').addEventListener('click',()=>{ empezar(); });
+    function pintarBtn(){ bPlay.textContent = st.n>=o.N?'Otra vez':(st.run?'Pausar':'Seguir'); }
+    function empezar(){ st.ctx=o.prep(); st.k=o.series.map(()=>0); st.n=0; st.acc=0; st.hist=o.series.map(()=>[]); $(o.txt).textContent='';
+      const leg=host.querySelector('.leyenda'); leg.innerHTML=o.series.map(sr=>'<span><i style="background:'+sr.col+'"></i>'+sr.lab+'</span>').join('')+o.teoria(st.ctx).map(t=>'<span><i style="background:'+t.col+';opacity:.6"></i>'+t.lab+' = '+t.v.toFixed(3)+'</span>').join('');
+      if(reduce){ while(st.n<o.N) paso(); st.run=false; dib(); fin(); pintarBtn(); return; }
+      st.run=true; pintarBtn(); loop(); }
+    function paso(){ const r=o.trial(st.ctx); r.forEach((b,j)=>{ if(b) st.k[j]++; }); st.n++; st.hist.forEach((hh,j)=>hh.push(st.k[j]/st.n)); }
+    function loop(){ if(!st.run) return; st.acc += {1:0.25,10:2.5,100:25}[st.vel]; while(st.acc>=1 && st.n<o.N){ paso(); st.acc--; } dib(); if(st.n>=o.N){ st.run=false; fin(); pintarBtn(); return; } requestAnimationFrame(loop); }
+    function fin(){ if(st.n>0) $(o.txt).innerHTML=o.resumen(st.k,st.n,st.ctx); }
+    function dib(){ if(!cv.offsetParent) return; const {ctx,w,h}=fit(cv), padL=40,padR=12,padT=12,padB=28;
+      const X=i=>padL+i/o.N*(w-padL-padR), Y=v=>h-padB-v*(h-padT-padB);
+      const LINE=css('--line'),MUT=css('--muted'); ctx.clearRect(0,0,w,h); ctx.font='12px "IBM Plex Mono", monospace';
+      ctx.strokeStyle=LINE; ctx.fillStyle=MUT; ctx.textAlign='right';
+      for(let v=0;v<=1.0001;v+=.25){ ctx.globalAlpha=.5; ctx.beginPath(); ctx.moveTo(padL,Y(v)); ctx.lineTo(w-padR,Y(v)); ctx.stroke(); ctx.globalAlpha=1; ctx.fillText(v.toFixed(2),padL-6,Y(v)+4); }
+      ctx.textAlign='center'; for(let i=0;i<=o.N;i+=o.N/4) ctx.fillText(i,X(i),h-padB+18);
+      o.teoria(st.ctx).forEach(t=>{ ctx.strokeStyle=t.col.startsWith('var(')?css(t.col.slice(4,-1)):t.col; ctx.globalAlpha=.7; ctx.setLineDash([6,5]); ctx.lineWidth=1.5; ctx.beginPath(); ctx.moveTo(padL,Y(t.v)); ctx.lineTo(w-padR,Y(t.v)); ctx.stroke(); ctx.setLineDash([]); ctx.globalAlpha=1; });
+      const rc=x=>x.startsWith('var(')?css(x.slice(4,-1)):x;
+      st.hist.forEach((hh,j)=>{ if(!hh.length) return; ctx.strokeStyle=rc(o.series[j].col); ctx.lineWidth=2.2; ctx.beginPath(); hh.forEach((v,i)=>{ const px=X(i+1),py=Y(v); i?ctx.lineTo(px,py):ctx.moveTo(px,py); }); ctx.stroke();
+        const last=hh[hh.length-1]; ctx.beginPath(); ctx.arc(X(hh.length),Y(last),4,0,7); ctx.fillStyle=rc(o.series[j].col); ctx.fill(); });
+      host.querySelector('.sim-n').textContent='repeticiones: '+st.n+' de '+o.N+(st.n?' · '+o.series.map((sr,j)=>sr.corto+' '+(st.k[j]/st.n).toFixed(3)).join(' · '):'');
+    }
+    SIM[c]={abrir(){ host.hidden=false; empezar(); }, reset(){ st.run=false; st.n=0; host.hidden=true; $(o.txt).textContent=''; }, dib};
+  }
+  ['2','3','4'].forEach(c=>{ const t=$('c'+c+'repTxt'); const d=document.createElement('div'); d.className='simpanel verdad'; d.id='sim'+c; d.hidden=true; t.before(d); });
+  const MUTC=()=>css('--muted');
+  crearSim(2,{N:1000,txt:'c2repTxt',series:[{lab:'proporción de rechazos',corto:'rechazos',col:'var(--red)'}],
+    prep:()=>{ const v=c2v(); return {...v,zc:ZC[v.a]}; },
+    trial:x=>{ let y=0; for(let i=0;i<x.n;i++) if(Math.random()<x.p) y++; return [(y/x.n-P0)/Math.sqrt(P0*(1-P0)/x.n)>x.zc]; },
+    teoria:x=>{ const t=[{v:+x.a,lab:'α',col:MUTC()}]; if(x.p>P0) t.push({v:c2pot(x.p,x.n,x.a),lab:'potencia teórica (aprox.)',col:css('--fg')}); return t; },
+    resumen:(k,N,x)=>{ const pr=(k[0]/N); return x.p===P0?'Rechazaste en <b>'+k[0]+'</b> de '+N+' veredas ('+pr.toFixed(3)+'). Como la prevalencia real es justo p₀, cada rechazo es un <b>error tipo I</b>, y la proporción se estabiliza cerca de α = '+x.a+'.'
+      : (x.p<P0?'Rechazaste en <b>'+k[0]+'</b> de '+N+' veredas. La prevalencia real es menor que p₀, así que casi nunca deberías rechazar.'
+      : 'Rechazaste en <b>'+k[0]+'</b> de '+N+' veredas: potencia simulada <b>'+pr.toFixed(3)+'</b>, contra '+c2pot(x.p,x.n,x.a).toFixed(3)+' teórica. Las otras '+(N-k[0])+' fueron errores tipo II.'); } });
+  crearSim(3,{N:1000,txt:'c3repTxt',series:[{lab:'proporción de rechazos',corto:'rechazos',col:'var(--red)'}],
+    prep:()=>{ const v=c3v(); return {...v,tc:tinv(1-(+v.a),2*v.n-2)}; },
+    trial:x=>[ensayo(x.n,x.d,x.s).T>x.tc],
+    teoria:x=>{ const t=[{v:+x.a,lab:'α',col:MUTC()}]; if(x.d>0) t.push({v:1-Phi(x.tc-x.d/(x.s*Math.sqrt(2/x.n))),lab:'potencia (aprox. normal)',col:css('--fg')}); return t; },
+    resumen:(k,N,x)=>{ const pr=k[0]/N; return x.d===0?'Rechazaste en <b>'+k[0]+'</b> de '+N+' ensayos ('+pr.toFixed(3)+'). Los tratamientos son iguales: cada rechazo es un <b>error tipo I</b>, cerca de α = '+x.a+'.'
+      : 'El ensayo detectó la ventaja en <b>'+k[0]+'</b> de '+N+' repeticiones: potencia simulada <b>'+pr.toFixed(3)+'</b>. Las otras '+(N-k[0])+' fueron errores tipo II.'; } });
+  crearSim(4,{N:1000,txt:'c4repTxt',series:[{lab:'rechazos χ²',corto:'χ²',col:'var(--red)'},{lab:'rechazos F',corto:'F',col:'#d9b26f'}],
+    prep:()=>{ const v=c4v(), ca=1-(+v.a), gl=v.n-1; return {...v,gl,xc:chi2inv(ca,gl),fc:finv(ca,gl,gl)}; },
+    trial:x=>{ const b=banco(x.n,x.s1,x.s2,x.forma); return [b.chi>x.xc,b.F>x.fc]; },
+    teoria:x=>{ const nt=x.forma==='pesadas'?' si fuera normal':''; return [{v:+x.a,lab:'α',col:MUTC()},{v:1-chi2cdf(x.xc*64/(x.s1*x.s1),x.gl),lab:'teórica χ²'+nt,col:css('--red')},{v:1-fcdf(x.fc*x.s2*x.s2/(x.s1*x.s1),x.gl,x.gl),lab:'teórica F'+nt,col:'#d9b26f'}]; },
+    resumen:(k,N,x)=>{ let t='χ²: rechazaste en <b>'+k[0]+'</b> de '+N+' ('+(k[0]/N).toFixed(3)+'). F: <b>'+k[1]+'</b> de '+N+' ('+(k[1]/N).toFixed(3)+'). ';
+      if(x.s1===8) t+= x.forma==='pesadas' ? 'El digital cumple justo la norma, así que la χ² debería rechazar cerca de α = '+x.a+'. <b>Con colas pesadas rechaza muchísimo más:</b> la prueba deja de ser confiable cuando los datos no son normales.' : 'El digital cumple justo la norma: la χ² rechaza cerca de α = '+x.a+', como debe ser.';
+      else if(x.s1<8) t+='El digital cumple la norma: los rechazos de la χ² son errores tipo I.';
+      return t; } });
+  $('c2rep').textContent='Repetir muchas veces'; $('c3rep').textContent='Repetir muchas veces'; $('c4rep').textContent='Repetir muchas veces';
+  ['2','3','4'].forEach(c=>{ const b=$('c'+c+'rep'), nb=b.cloneNode(true); b.replaceWith(nb); nb.addEventListener('click',()=>SIM[c].abrir()); });
+
+  // ---- fases en pestañas ----
+  var FASES=['Admisión','Diseño','Laboratorio','Junta'], faseAct={1:0,2:0,3:0,4:0};
+  const REDRAW={1:()=>{ actualizar(); },2:()=>{ c2act(); },3:()=>{ c3act(); },4:()=>{ c4act(); }};
+  function irFase(c,f){
+    faseAct[c]=f; const sec=$('vista-caso'+c);
+    sec.querySelectorAll('.fases [role=tab]').forEach((b,i)=>{ b.setAttribute('aria-selected',i===f); b.tabIndex=i===f?0:-1; });
+    sec.querySelectorAll('.fase-panel').forEach((p,i)=>p.hidden=i!==f);
+    const bar=sec.querySelector('.fases'); const top=bar.getBoundingClientRect().top;
+    if(top<0 || window.scrollY>sec.offsetTop+40) window.scrollTo({top:sec.offsetTop, behavior:'auto'});
+    requestAnimationFrame(()=>{ REDRAW[c](); if(SIM[c]) SIM[c].dib(); MIS[c]&&MIS[c].render(); });
+  }
+  [1,2,3,4].forEach(c=>{
+    const sec=$('vista-caso'+c), kids=[...sec.children], volver=kids[0], mis=sec.querySelector('.mision'), iM=kids.indexOf(mis);
+    const mid=kids.slice(4,iM), lab=mid.pop(), grupos=[[kids[1],kids[2]],[kids[3],...mid],[lab],[mis]];
+    const bar=document.createElement('div'); bar.className='fases'; bar.setAttribute('role','tablist'); bar.setAttribute('aria-label','Fases del caso');
+    FASES.forEach((nm,i)=>{ const b=document.createElement('button'); b.type='button'; b.setAttribute('role','tab'); b.id='f'+c+'-'+i; b.setAttribute('aria-controls','fp'+c+'-'+i);
+      b.innerHTML='<span class="fn">'+(i+1)+'</span>'+nm+(i===3?'<span class="listo" hidden title="Datos listos">●</span>':''); b.addEventListener('click',()=>irFase(c,i)); bar.appendChild(b); });
+    bar.addEventListener('keydown',e=>{ if(e.key!=='ArrowRight'&&e.key!=='ArrowLeft') return; e.preventDefault(); const f=(faseAct[c]+(e.key==='ArrowRight'?1:3))%4; irFase(c,f); $('f'+c+'-'+f).focus(); });
+    volver.after(bar); let prev=bar;
+    grupos.forEach((g,i)=>{ const p=document.createElement('div'); p.className='fase-panel'; p.id='fp'+c+'-'+i; p.setAttribute('role','tabpanel'); p.setAttribute('aria-labelledby','f'+c+'-'+i);
+      g.forEach(el=>p.appendChild(el));
+      if(i<3){ const nb=document.createElement('button'); nb.type='button'; nb.className='btn sec sig-fase'; nb.textContent='Siguiente: '+FASES[i+1]+' →'; nb.addEventListener('click',()=>irFase(c,i+1)); p.appendChild(nb); }
+      prev.after(p); prev=p; });
+    irFase(c,0);
+  });
+
+  // ---- parámetros ocultos en modo Jefe ----
+  const pick=a=>a[Math.floor(Math.random()*a.length)];
+  function asignarVerdad(c){
+    if(est.nivel!=='jefe') return;
+    if(c===2){ $('c2p').value=pick([7,8,10,12,14,16]); }
+    if(c===3){ $('c3d').value=pick([0,0,1.5,3,4.5,6]); }
+    if(c===4){ $('c4s1').value=pick([6,8,9,11,13]); $('c4s2').value=pick([5,6,7]); }
+  }
+
+  limpiar(); mostrar(); actualizar(); ecgFrame();
+})();
+</script>
+
+</body>
+</html>
